@@ -27,15 +27,21 @@ const PER_DEVICE_CONFIG = {
 /**
  * This class uses the Singleton pattern to ensure that only one instance of the model is loaded.
  */
-class PipelineSingeton {
+class PipelineSingleton {
     static asr_model_id = 'whisper-base_timestamped';
     static asr_instance = null;
+    static currentDevice = null;
 
     static segmentation_model_id = 'pyannote-segmentation-3.0';
     static segmentation_instance = null;
     static segmentation_processor = null;
 
     static async getInstance(progress_callback = null, device = 'webgpu') {
+        if (this.currentDevice !== device) {
+            this.asr_instance = null;
+            this.currentDevice = device;
+        }
+
         const loadAsr = async () => {
             try {
                 return await pipeline('automatic-speech-recognition', this.asr_model_id, {
@@ -77,9 +83,24 @@ class PipelineSingeton {
             }
         };
 
-        this.asr_instance ??= loadAsr();
-        this.segmentation_processor ??= loadSegProcessor();
-        this.segmentation_instance ??= loadSegModel();
+        if (!this.asr_instance) {
+            this.asr_instance = loadAsr().catch((err) => {
+                this.asr_instance = null;
+                throw err;
+            });
+        }
+        if (!this.segmentation_processor) {
+            this.segmentation_processor = loadSegProcessor().catch((err) => {
+                this.segmentation_processor = null;
+                throw err;
+            });
+        }
+        if (!this.segmentation_instance) {
+            this.segmentation_instance = loadSegModel().catch((err) => {
+                this.segmentation_instance = null;
+                throw err;
+            });
+        }
 
         return Promise.all([this.asr_instance, this.segmentation_processor, this.segmentation_instance]);
     }
@@ -91,12 +112,26 @@ async function load({ device }) {
         data: `Loading models (${device})...`
     });
 
-    // Load the pipeline and save it for future use.
-    const [transcriber] = await PipelineSingeton.getInstance(x => {
-        // We also add a progress callback to the pipeline so that we can
-        // track model loading.
-        self.postMessage(x);
-    }, device);
+    let transcriber;
+    try {
+        [transcriber] = await PipelineSingleton.getInstance(x => {
+            self.postMessage(x);
+        }, device);
+    } catch (err) {
+        if (device === 'webgpu') {
+            console.warn('WebGPU failed, falling back to WASM backend:', err);
+            self.postMessage({
+                status: 'loading',
+                data: 'WebGPU unavailable. Falling back to WASM...'
+            });
+            device = 'wasm';
+            [transcriber] = await PipelineSingleton.getInstance(x => {
+                self.postMessage(x);
+            }, 'wasm');
+        } else {
+            throw err;
+        }
+    }
 
     if (device === 'webgpu') {
         self.postMessage({
@@ -126,7 +161,8 @@ async function segment(processor, model, audio) {
 }
 
 async function run({ audio, language, meetingId }) {
-    const [transcriber, segmentation_processor, segmentation_model] = await PipelineSingeton.getInstance();
+    const device = PipelineSingleton.currentDevice || 'wasm';
+    const [transcriber, segmentation_processor, segmentation_model] = await PipelineSingleton.getInstance(null, device);
 
     const start = performance.now();
 
