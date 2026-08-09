@@ -126,8 +126,13 @@ export default function App() {
     };
 
     const startRecording = async () => {
+        let stream;
         try {
-            const stream = await getAudioStream(deviceId);
+            stream = await getAudioStream(deviceId);
+        } catch (reason) {
+            return setError(`Microphone access error: ${reason.message}`);
+        }
+        try {
             await ensureModels();
             await refreshDevices();
             mediaStream.current = stream;
@@ -154,7 +159,10 @@ export default function App() {
                 decodeAndTranscribe(blob, meeting);
             };
             recordingStart.current = Date.now(); setRecordingSeconds(0); setRecording(true); recorder.start(1000);
-        } catch (reason) { setError(`Microphone access was not available: ${reason.message}`); }
+        } catch (reason) {
+            if (stream) stream.getTracks().forEach((track) => track.stop());
+            setError(`Model loading error: ${reason.message}`);
+        }
     };
     const stopRecording = () => { if (mediaRecorder.current?.state === 'recording') { mediaRecorder.current.stop(); setRecording(false); } };
 

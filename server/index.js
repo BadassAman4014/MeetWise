@@ -10,8 +10,28 @@ const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css
 createServer(async (request, response) => {
     const url = new URL(request.url, `http://${request.headers.host}`);
     if (url.pathname === '/api/summarize') return handleSummarize(request, response);
+
     const requested = normalize(join(root, url.pathname === '/' ? 'index.html' : url.pathname));
-    const file = requested.startsWith(root) && existsSync(requested) ? requested : join(root, 'index.html');
-    response.writeHead(200, { 'Content-Type': mime[extname(file)] || 'application/octet-stream' });
-    createReadStream(file).pipe(response);
+    const isFileWithinRoot = requested.startsWith(root) && existsSync(requested);
+
+    if (isFileWithinRoot) {
+        response.writeHead(200, { 'Content-Type': mime[extname(requested)] || 'application/octet-stream' });
+        return createReadStream(requested).pipe(response);
+    }
+
+    // For missing asset/model files or path extensions, return 404 instead of index.html
+    if (extname(url.pathname) || url.pathname.startsWith('/models/') || url.pathname.startsWith('/assets/')) {
+        response.writeHead(404, { 'Content-Type': 'application/json' });
+        return response.end(JSON.stringify({ error: 'Asset not found' }));
+    }
+
+    const fallback = join(root, 'index.html');
+    if (existsSync(fallback)) {
+        response.writeHead(200, { 'Content-Type': 'text/html' });
+        return createReadStream(fallback).pipe(response);
+    }
+
+    response.writeHead(404);
+    response.end('Not found');
 }).listen(process.env.PORT || 4173, () => console.log(`Meetwise is ready on http://localhost:${process.env.PORT || 4173}`));
+

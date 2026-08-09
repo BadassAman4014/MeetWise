@@ -1,4 +1,3 @@
-
 import {
     env,
     pipeline,
@@ -6,9 +5,9 @@ import {
     AutoModelForAudioFrameClassification,
 } from '@huggingface/transformers';
 
-// Load the bundled assets only. No inference request is sent to Hugging Face.
+// Allow local models first, but allow remote fallback from Hugging Face CDN if not bundled locally
 env.allowLocalModels = true;
-env.allowRemoteModels = false;
+env.allowRemoteModels = true;
 env.localModelPath = '/models/';
 
 const PER_DEVICE_CONFIG = {
@@ -37,21 +36,50 @@ class PipelineSingeton {
     static segmentation_processor = null;
 
     static async getInstance(progress_callback = null, device = 'webgpu') {
-        this.asr_instance ??= pipeline('automatic-speech-recognition', this.asr_model_id, {
-            ...PER_DEVICE_CONFIG[device],
-            progress_callback,
-        });
+        const loadAsr = async () => {
+            try {
+                return await pipeline('automatic-speech-recognition', this.asr_model_id, {
+                    ...PER_DEVICE_CONFIG[device],
+                    progress_callback,
+                });
+            } catch (err) {
+                console.warn('Local ASR model not found, fetching remote model from Hugging Face Hub:', err);
+                return await pipeline('automatic-speech-recognition', 'onnx-community/whisper-base_timestamped', {
+                    ...PER_DEVICE_CONFIG[device],
+                    progress_callback,
+                });
+            }
+        };
 
-        this.segmentation_processor ??= AutoProcessor.from_pretrained(this.segmentation_model_id, {
-            progress_callback,
-        });
-        this.segmentation_instance ??= AutoModelForAudioFrameClassification.from_pretrained(this.segmentation_model_id, {
-            // NOTE: WebGPU is not currently supported for this model
-            // See https://github.com/microsoft/onnxruntime/issues/21386
-            device: 'wasm',
-            dtype: 'fp32',
-            progress_callback,
-        });
+        const loadSegProcessor = async () => {
+            try {
+                return await AutoProcessor.from_pretrained(this.segmentation_model_id, { progress_callback });
+            } catch (err) {
+                console.warn('Local segmentation processor not found, fetching remote:', err);
+                return await AutoProcessor.from_pretrained('onnx-community/pyannote-segmentation-3.0', { progress_callback });
+            }
+        };
+
+        const loadSegModel = async () => {
+            try {
+                return await AutoModelForAudioFrameClassification.from_pretrained(this.segmentation_model_id, {
+                    device: 'wasm',
+                    dtype: 'fp32',
+                    progress_callback,
+                });
+            } catch (err) {
+                console.warn('Local segmentation model not found, fetching remote:', err);
+                return await AutoModelForAudioFrameClassification.from_pretrained('onnx-community/pyannote-segmentation-3.0', {
+                    device: 'wasm',
+                    dtype: 'fp32',
+                    progress_callback,
+                });
+            }
+        };
+
+        this.asr_instance ??= loadAsr();
+        this.segmentation_processor ??= loadSegProcessor();
+        this.segmentation_instance ??= loadSegModel();
 
         return Promise.all([this.asr_instance, this.segmentation_processor, this.segmentation_instance]);
     }
