@@ -89,6 +89,22 @@ export default function App() {
         return promise;
     }, [status]);
 
+    const getAudioStream = async (targetDeviceId) => {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            throw new Error('Microphone access is not supported by this browser. If you are using an in-app browser (like Instagram, LinkedIn, or Slack), please open the link in Safari or Chrome.');
+        }
+        try {
+            const audioConstraints = targetDeviceId && targetDeviceId !== 'default'
+                ? { deviceId: { ideal: targetDeviceId }, echoCancellation: true, noiseSuppression: true }
+                : { echoCancellation: true, noiseSuppression: true };
+            return await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+        } catch (firstErr) {
+            console.warn('Ideal audio constraints failed, trying basic audio stream', firstErr);
+            // Fallback for mobile browsers that reject specific constraints
+            return await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
+    };
+
     const decodeAndTranscribe = useCallback(async (blob, meeting) => {
         try {
             const context = new AudioContext({ sampleRate: 16_000 });
@@ -111,11 +127,8 @@ export default function App() {
 
     const startRecording = async () => {
         try {
+            const stream = await getAudioStream(deviceId);
             await ensureModels();
-            const audioConstraints = deviceId === 'default'
-                ? { echoCancellation: true, noiseSuppression: true }
-                : { deviceId: { exact: deviceId }, echoCancellation: true, noiseSuppression: true };
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
             await refreshDevices();
             mediaStream.current = stream;
             const chunks = [];
