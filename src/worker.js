@@ -166,13 +166,17 @@ async function run({ audio, language, meetingId }) {
 
     const start = performance.now();
 
+    const transcribeOptions = {
+        return_timestamps: 'word',
+        chunk_length_s: 30,
+    };
+    if (language && language !== 'auto') {
+        transcribeOptions.language = language;
+    }
+
     // Run transcription and segmentation in parallel
     const [transcript, segments] = await Promise.all([
-        transcriber(audio, {
-            language,
-            return_timestamps: 'word',
-            chunk_length_s: 30,
-        }),
+        transcriber(audio, transcribeOptions),
         segment(segmentation_processor, segmentation_model, audio)
     ]);
     const end = performance.now();

@@ -43,7 +43,7 @@ export default function App() {
     const [recordingSeconds, setRecordingSeconds] = useState(0);
     const [devices, setDevices] = useState([]);
     const [deviceId, setDeviceId] = useState('default');
-    const [language, setLanguage] = useState('en');
+    const [language, setLanguage] = useState('auto');
     const [tab, setTab] = useState('notes');
     const [error, setError] = useState('');
     const [audioUrl, setAudioUrl] = useState('');
@@ -181,26 +181,41 @@ export default function App() {
 
     const modelLabel = summaryModel === 'nvidia' ? 'NVIDIA Nemotron' : 'Gemini';
 
-    const summarize = useCallback(async (task, meetingId, overrideTranscript) => {
+    const summarize = useCallback(async (task, meetingId, overrideTranscript, modelOverride) => {
         const targetId = meetingId || selectedId;
         const target = meetings.find((m) => m.id === targetId);
         const text = getTranscriptText(overrideTranscript || target);
         if (!text) return setError('Finish transcription before summarizing.');
+
+        const activeModel = modelOverride || summaryModel;
+        if (modelOverride && modelOverride !== summaryModel) {
+            setSummaryModel(modelOverride);
+        }
+
         updateMeeting(targetId, { summaryState: task });
-        const endpoint = summaryModel === 'nvidia' ? '/api/summarize/nvidia' : '/api/summarize';
+        const modelName = activeModel === 'nvidia' ? 'NVIDIA Nemotron' : 'Gemini';
+        const endpoint = activeModel === 'nvidia' ? '/api/summarize/nvidia' : '/api/summarize';
         try {
             const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task, transcript: text, title: target?.title || 'Meeting' }) });
             const rawResponse = await response.text();
             let payload;
             try { payload = rawResponse ? JSON.parse(rawResponse) : {}; } catch { throw new Error(`Summary service returned an invalid response (HTTP ${response.status}). Run the app with npm run dev or npm start, not npm run preview.`); }
-            if (!response.ok) throw new Error(payload.error || `${modelLabel} summary service failed (HTTP ${response.status}).`);
-            if (!payload.result) throw new Error(`${modelLabel} returned no structured meeting data.`);
-            const sharedChanges = { title: payload.result.title || target?.title, summaryState: null, summaryProvider: summaryModel };
+            if (!response.ok) {
+                const rawErr = payload.error || '';
+                if (activeModel === 'gemini' && (rawErr.includes('Quota exceeded') || rawErr.includes('quota') || rawErr.includes('rate-limit') || response.status === 429)) {
+                    throw new Error('Gemini quota limit exceeded. Click "Retry with NVIDIA Nemotron" to generate your notes.');
+                }
+                throw new Error(rawErr || `${modelName} summary service failed (HTTP ${response.status}).`);
+            }
+            if (!payload.result) throw new Error(`${modelName} returned no structured meeting data.`);
+
+            setError('');
+            const sharedChanges = { title: payload.result.title || target?.title, summaryState: null, summaryProvider: activeModel };
             updateMeeting(targetId, task === 'summary'
-                ? { ...sharedChanges, summary: { overview: payload.result.overview, decisions: payload.result.decisions, actionItems: payload.result.actionItems, openQuestions: payload.result.openQuestions }, refinedTranscript: payload.result.refinedTranscript }
+                ? { ...sharedChanges, summary: { overview: payload.result.overview, decisions: payload.result.decisions, actionItems: payload.result.actionItems, openQuestions: payload.result.openQuestions, scheduledEvents: payload.result.scheduledEvents || [] }, refinedTranscript: payload.result.refinedTranscript }
                 : { ...sharedChanges, refinedTranscript: payload.result.refinedTranscript });
         } catch (reason) { updateMeeting(targetId, { summaryState: null }); setError(reason.message); }
-    }, [meetings, selectedId, updateMeeting, summaryModel, modelLabel]);
+    }, [meetings, selectedId, updateMeeting, summaryModel]);
 
     const autoSummarize = useRef(null);
     useEffect(() => { autoSummarize.current = (id, transcript) => summarize('summary', id, transcript); }, [summarize]);
@@ -240,7 +255,24 @@ export default function App() {
         {mobileMenuOpen && <div className="sidebar-backdrop" onClick={() => setMobileMenuOpen(false)} />}
         <section className="main-panel"><header className="topbar"><div><p className="eyebrow">MEETING WORKSPACE</p><h1>{selectedMeeting?.title || 'Your meeting co-pilot'}</h1></div><div className="header-actions">{selectedMeeting && <><button onClick={renameSelected}>Rename</button><button onClick={removeSelected}>Delete</button></>}</div></header>
             <div className="recording-console"><div className={`record-indicator ${recording ? 'live' : ''}`}><span></span><div><b>{recording ? 'Recording now' : status === 'running' || selectedMeeting?.state === 'transcribing' || selectedMeeting?.state === 'queued' ? 'Transcribing recording' : hasRecording ? 'Recording completed' : 'Ready for your next meeting'}</b><small>{recording ? formatDuration(recordingSeconds) : 'Select your mic and press record'}</small></div></div><div className="console-controls"><label className="device-select"><span>Microphone</span><select value={deviceId} onChange={(event) => setDeviceId(event.target.value)} onClick={refreshDevices}><option value="default">System default microphone</option>{devices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>)}</select></label><label className="device-select language-select"><span>Language</span><LanguageSelector language={language} setLanguage={setLanguage} /></label>{!hasRecording && !recording && <label className="upload-button">Import<input type="file" accept="audio/*,video/*" hidden onChange={(event) => importFile(event.target.files[0])} /></label>}<button className={`record-button ${recording ? 'stop' : ''}`} onClick={recording ? stopRecording : startRecording} disabled={recording ? false : (status === 'running' || hasRecording)} title={hasRecording && !recording ? 'This meeting already has a recording. Click "+ New meeting" to record again.' : ''}>{recording ? '■ Stop' : hasRecording ? '● Submitted' : '● Start recording'}</button></div></div>
-            {error && <p className="error-message">{error}<button onClick={() => setError('')}>×</button></p>}
+            {error && (
+                <div className="error-message">
+                    <span>{error}</span>
+                    {(error.toLowerCase().includes('gemini') || error.toLowerCase().includes('quota') || error.toLowerCase().includes('limit')) && (
+                        <button
+                            className="retry-nemotron-banner-btn"
+                            onClick={() => {
+                                setError('');
+                                setSummaryModel('nvidia');
+                                summarize('summary', undefined, undefined, 'nvidia');
+                            }}
+                        >
+                            ✦ Retry with NVIDIA Nemotron
+                        </button>
+                    )}
+                    <button className="close-error-btn" onClick={() => setError('')}>×</button>
+                </div>
+            )}
             {selectedMeeting ? <><nav className="tabs"><button className={tab === 'notes' ? 'active' : ''} onClick={() => setTab('notes')}>Notes</button><button className={tab === 'transcript' ? 'active' : ''} onClick={() => setTab('transcript')}>Full transcription</button></nav>{tab === 'notes' ? <Notes meeting={selectedMeeting} summarize={summarize} summaryModel={summaryModel} setSummaryModel={setSummaryModel} modelLabel={modelLabel} updateMeeting={updateMeeting} /> : <TranscriptView meeting={selectedMeeting} audioUrl={audioUrl} summarize={summarize} language={language} summaryModel={summaryModel} modelLabel={modelLabel} />}</> : <section className="welcome"><div className="orb">◌</div><h2>Capture the conversation.</h2><p>Start a recording, then get searchable speaker-aware transcription and focused meeting notes.</p><button className="record-button" onClick={startRecording}>● Start recording</button></section>}
         </section>
 
@@ -300,8 +332,20 @@ function Notes({ meeting, summarize, summaryModel, setSummaryModel, modelLabel, 
         <section className="notes-card empty-notes">
             <p className="note-kicker">AI MEETING NOTES</p>
             <h2>{meeting.state === 'complete' ? 'Generating notes…' : 'Turn this conversation into clarity.'}</h2>
-            <p>{meeting.state === 'complete' ? `${modelLabel} is automatically analysing the transcript. This usually takes a few seconds.` : 'Notes will be generated automatically once transcription completes.'}</p>
-            {meeting.state === 'complete' && <button className="gemini-button" onClick={() => summarize('summary')}>✦ Retry generating notes</button>}
+            <p>{meeting.state === 'complete' ? `${modelLabel} is analysing the transcript. If Gemini free tier limit is reached, you can retry with NVIDIA Nemotron.` : 'Notes will be generated automatically once transcription completes.'}</p>
+            {meeting.state === 'complete' && (
+                <div className="empty-notes-actions">
+                    <button className="gemini-button" onClick={() => summarize('summary', meeting.id)}>
+                        ✦ Retry with {modelLabel}
+                    </button>
+                    <button
+                        className="gemini-button nvidia-retry-btn"
+                        onClick={() => summarize('summary', meeting.id, undefined, 'nvidia')}
+                    >
+                        ⚡ Retry with NVIDIA Nemotron
+                    </button>
+                </div>
+            )}
         </section>
     );
 
@@ -530,7 +574,8 @@ function Notes({ meeting, summarize, summaryModel, setSummaryModel, modelLabel, 
                                         <button
                                             className="gcal-card-btn"
                                             onClick={() => {
-                                                const fallback = extractDateAndTime(`${evt.title} ${evt.description || ''}`);
+                                                const meetingText = getTranscriptText(meeting);
+                                                const fallback = extractDateAndTime(`${evt.title} ${evt.description || ''}`, meetingText);
                                                 setActiveCalendarEvent({
                                                     title: evt.title,
                                                     description: evt.description || `Discussed during ${meeting.title}`,
@@ -579,7 +624,8 @@ function Notes({ meeting, summarize, summaryModel, setSummaryModel, modelLabel, 
                                                 className="schedule-badge-btn"
                                                 title="Schedule this action item in Google Calendar"
                                                 onClick={() => {
-                                                    const extracted = extractDateAndTime(item);
+                                                    const meetingText = getTranscriptText(meeting);
+                                                    const extracted = extractDateAndTime(item, meetingText);
                                                     setActiveCalendarEvent({
                                                         title: item,
                                                         description: `Action item from meeting: ${meeting.title}`,

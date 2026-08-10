@@ -12,6 +12,7 @@ function titleCase(str) {
 // https://help.openai.com/en/articles/7031512-whisper-api-faq
 // https://github.com/openai/whisper/blob/248b6cb124225dd263bb9bd32d060b6517e067f8/whisper/tokenizer.py#L79
 const LANGUAGES = {
+    auto: "auto detect",
     en: "english",
     zh: "chinese",
     de: "german",
@@ -112,6 +113,7 @@ const LANGUAGES = {
     jw: "javanese",
     su: "sundanese",
 };
+
 function LanguageSelector({ language, setLanguage, ...props }) {
     const handleLanguageChange = (event) => {
         setLanguage(event.target.value);
@@ -131,4 +133,5 @@ function LanguageSelector({ language, setLanguage, ...props }) {
         </select>
     );
 }
-export default LanguageSelector
+
+export default LanguageSelector;
