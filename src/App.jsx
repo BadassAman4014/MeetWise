@@ -226,7 +226,6 @@ export default function App() {
                 </div>
                 <div className="sidebar-actions">
                     <button className="new-meeting" onClick={() => { createMeeting(); setMobileMenuOpen(false); }} disabled={recording || status === 'running'}>+ New meeting</button>
-                    <button className="ask-copilot-sidebar-btn" onClick={() => { setChatOpen(true); setMobileMenuOpen(false); }}>💬 Ask Co-Pilot</button>
                 </div>
             </div>
             <div className="sidebar-body">
@@ -239,11 +238,18 @@ export default function App() {
             </div>
         </aside>
         {mobileMenuOpen && <div className="sidebar-backdrop" onClick={() => setMobileMenuOpen(false)} />}
-        <section className="main-panel"><header className="topbar"><div><p className="eyebrow">MEETING WORKSPACE</p><h1>{selectedMeeting?.title || 'Your meeting co-pilot'}</h1></div><div className="header-actions"><button className="ask-copilot-btn" onClick={() => setChatOpen(true)}>💬 Ask Co-Pilot</button>{selectedMeeting && <><button onClick={renameSelected}>Rename</button><button onClick={removeSelected}>Delete</button></>}</div></header>
+        <section className="main-panel"><header className="topbar"><div><p className="eyebrow">MEETING WORKSPACE</p><h1>{selectedMeeting?.title || 'Your meeting co-pilot'}</h1></div><div className="header-actions">{selectedMeeting && <><button onClick={renameSelected}>Rename</button><button onClick={removeSelected}>Delete</button></>}</div></header>
             <div className="recording-console"><div className={`record-indicator ${recording ? 'live' : ''}`}><span></span><div><b>{recording ? 'Recording now' : status === 'running' || selectedMeeting?.state === 'transcribing' || selectedMeeting?.state === 'queued' ? 'Transcribing recording' : hasRecording ? 'Recording completed' : 'Ready for your next meeting'}</b><small>{recording ? formatDuration(recordingSeconds) : 'Select your mic and press record'}</small></div></div><div className="console-controls"><label className="device-select"><span>Microphone</span><select value={deviceId} onChange={(event) => setDeviceId(event.target.value)} onClick={refreshDevices}><option value="default">System default microphone</option>{devices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>)}</select></label><label className="device-select language-select"><span>Language</span><LanguageSelector language={language} setLanguage={setLanguage} /></label><label className="upload-button">Import<input type="file" accept="audio/*,video/*" hidden onChange={(event) => importFile(event.target.files[0])} /></label><button className={`record-button ${recording ? 'stop' : ''}`} onClick={recording ? stopRecording : startRecording} disabled={recording ? false : (status === 'running' || hasRecording)} title={hasRecording && !recording ? 'This meeting already has a recording. Click "+ New meeting" to record again.' : ''}>{recording ? '■ Stop' : hasRecording ? '● Submitted' : '● Start recording'}</button></div></div>
             {error && <p className="error-message">{error}<button onClick={() => setError('')}>×</button></p>}
             {selectedMeeting ? <><nav className="tabs"><button className={tab === 'notes' ? 'active' : ''} onClick={() => setTab('notes')}>Notes</button><button className={tab === 'transcript' ? 'active' : ''} onClick={() => setTab('transcript')}>Full transcription</button></nav>{tab === 'notes' ? <Notes meeting={selectedMeeting} summarize={summarize} summaryModel={summaryModel} setSummaryModel={setSummaryModel} modelLabel={modelLabel} updateMeeting={updateMeeting} /> : <TranscriptView meeting={selectedMeeting} audioUrl={audioUrl} summarize={summarize} language={language} summaryModel={summaryModel} modelLabel={modelLabel} />}</> : <section className="welcome"><div className="orb">◌</div><h2>Capture the conversation.</h2><p>Start a recording, then get searchable speaker-aware transcription and focused meeting notes.</p><button className="record-button" onClick={startRecording}>● Start recording</button></section>}
         </section>
+
+        {!chatOpen && (
+            <button className="copilot-fab" onClick={() => setChatOpen(true)} title="Ask MeetWise Co-Pilot">
+                <span className="fab-icon">💬</span>
+                <span className="fab-label">Co-Pilot</span>
+            </button>
+        )}
 
         <ChatDrawer
             isOpen={chatOpen}

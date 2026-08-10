@@ -58,19 +58,10 @@
         width: auto;
         margin-bottom: 0;
         padding: 7px 10px;
-        font-size: .72rem;
+        font-size: .82rem;
         border-radius: 8px;
         flex-shrink: 0;
         white-space: nowrap;
-    }
-
-    .ask-copilot-sidebar-btn {
-        width: auto;
-        margin-top: 0;
-        padding: 7px 10px;
-        font-size: .72rem;
-        white-space: nowrap;
-        flex-shrink: 0;
     }
 
     /* Hide sidebar body by default on mobile */
@@ -155,19 +146,12 @@
     .main-panel { padding: 28px 20px 45px; }
     .recording-console { align-items: stretch; flex-direction: column; }
     .console-controls { flex-wrap: wrap; }
-
-    /* Topbar header Co-Pilot button */
-    .ask-copilot-btn { padding: 7px 10px; font-size: .72rem; }
 }
 
-/* Extra small screens — icon-only buttons */
+/* Extra small screens */
 @media (max-width: 420px) {
     .new-meeting { padding: 7px 8px; font-size: 0; }
-    .new-meeting::before { content: '+ New'; font-size: .72rem; }
-    .ask-copilot-sidebar-btn { padding: 7px 8px; font-size: 0; }
-    .ask-copilot-sidebar-btn::before { content: '💬 Chat'; font-size: .72rem; }
-    .ask-copilot-btn { padding: 6px 8px; font-size: 0; }
-    .ask-copilot-btn::before { content: '💬'; font-size: .85rem; }
+    .new-meeting::before { content: '+ New'; font-size: .78rem; }
     .brand { font-size: .95rem; }
 }
 @media (max-width: 540px) { .topbar, .console-controls, .notes-header, .transcript-toolbar { flex-direction: column; }.console-controls { align-items: stretch; }.device-select select, .language-select select { width: 100%; }.upload-button, .record-button, .subtle-button { text-align: center; }.notes-card, .transcript-panel { padding: 22px; }.tabs { margin-top: 25px; }.header-actions { width: 100%; }.header-actions button { flex: 1; }.subtle-button { align-self: stretch; } }
@@ -1035,39 +1019,63 @@
     background: #1557b0;
 }
 
-/* Ask Co-Pilot Header & Sidebar Buttons */
-.ask-copilot-btn {
-    padding: 8px 14px;
-    border: 1px solid #1a73e8;
-    border-radius: 8px;
+/* ═══════════════════════════════════════════════════════
+   Floating Co-Pilot FAB
+   ═══════════════════════════════════════════════════════ */
+.copilot-fab {
+    position: fixed;
+    z-index: 100;
+    bottom: 28px;
+    right: 28px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 20px;
+    border: none;
+    border-radius: 50px;
     color: #ffffff;
-    background: linear-gradient(135deg, #1a73e8, #1557b0);
-    font-size: 0.82rem;
+    background: linear-gradient(135deg, #1a73e8, #0d47a1);
+    font-size: 0.88rem;
     font-weight: 700;
-    box-shadow: 0 4px 12px rgba(26, 115, 232, 0.25);
     cursor: pointer;
-    transition: transform 0.15s ease;
+    box-shadow: 0 6px 24px rgba(26, 115, 232, 0.45), 0 2px 8px rgba(0,0,0,0.2);
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: fabPulseIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.ask-copilot-btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 6px 16px rgba(26, 115, 232, 0.35);
+.copilot-fab:hover {
+    transform: translateY(-3px) scale(1.04);
+    box-shadow: 0 10px 35px rgba(26, 115, 232, 0.55), 0 4px 12px rgba(0,0,0,0.25);
+    background: linear-gradient(135deg, #2979ff, #1a73e8);
+}
+.copilot-fab:active {
+    transform: translateY(0) scale(0.97);
+}
+.fab-icon {
+    font-size: 1.2rem;
+    line-height: 1;
+}
+.fab-label {
+    letter-spacing: -0.01em;
 }
 
-.ask-copilot-sidebar-btn {
-    width: 100%;
-    margin-top: 8px;
-    padding: 10px 14px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 8px;
-    color: #fff;
-    background: rgba(255, 255, 255, 0.08);
-    font-size: 0.82rem;
-    font-weight: 700;
-    cursor: pointer;
-    text-align: left;
+@keyframes fabPulseIn {
+    0% { transform: scale(0.5); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
 }
-.ask-copilot-sidebar-btn:hover {
-    background: rgba(255, 255, 255, 0.18);
+
+/* Mobile: compact circle FAB */
+@media (max-width: 540px) {
+    .copilot-fab {
+        bottom: 20px;
+        right: 16px;
+        padding: 14px;
+        border-radius: 50%;
+        width: 56px;
+        height: 56px;
+        justify-content: center;
+    }
+    .fab-label { display: none; }
+    .fab-icon { font-size: 1.35rem; }
 }
 
 /* Chat Drawer Container & Backdrop */
