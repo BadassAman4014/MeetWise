@@ -34,6 +34,8 @@ export default function App() {
     const mediaStream = useRef(null);
     const recordingStart = useRef(0);
     const loadReady = useRef(null);
+    const audioBuffersRef = useRef({});
+    const retranscribeFileRef = useRef(null);
     const [meetings, setMeetings] = useState(() => JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'));
     const [selectedId, setSelectedId] = useState(() => JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')[0]?.id || null);
     const [status, setStatus] = useState('idle');
@@ -137,7 +139,8 @@ export default function App() {
             recorder.ondataavailable = ({ data }) => { if (data.size) chunks.push(data); };
             recorder.onstop = () => {
                 const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
-                setAudioUrl((oldUrl) => { if (oldUrl) URL.revokeObjectURL(oldUrl); return URL.createObjectURL(blob); });
+                const blobUrl = URL.createObjectURL(blob);
+                setAudioUrl((oldUrl) => { if (oldUrl) URL.revokeObjectURL(oldUrl); return blobUrl; });
                 const duration = (Date.now() - recordingStart.current) / 1000;
                 updateMeeting(meeting.id, { duration, state: 'queued' });
                 stream.getTracks().forEach((track) => track.stop());
@@ -150,6 +153,7 @@ export default function App() {
                         for (let channel = 0; channel < decoded.numberOfChannels; channel += 1) audio[index] += decoded.getChannelData(channel)[index] / decoded.numberOfChannels;
                     }
                     await context.close();
+                    audioBuffersRef.current[meeting.id] = { audio, url: blobUrl, blob };
                     decodeAndTranscribe(audio, meeting);
                 };
                 processRecording().catch(reason => { updateMeeting(meeting.id, { state: 'error' }); setError(`Could not decode the recording: ${reason.message}`); });
@@ -167,7 +171,8 @@ export default function App() {
         await ensureModels();
         const meeting = { id: newId(), title: 'Untitled meeting', createdAt: Date.now(), duration: 0, state: 'queued' };
         setMeetings((items) => [meeting, ...items]); setSelectedId(meeting.id); setTab('transcript');
-        setAudioUrl((oldUrl) => { if (oldUrl) URL.revokeObjectURL(oldUrl); return URL.createObjectURL(file); });
+        const blobUrl = URL.createObjectURL(file);
+        setAudioUrl((oldUrl) => { if (oldUrl) URL.revokeObjectURL(oldUrl); return blobUrl; });
         
         const context = new AudioContext({ sampleRate: 16_000 });
         const decoded = await context.decodeAudioData(await file.arrayBuffer());
@@ -176,7 +181,64 @@ export default function App() {
             for (let channel = 0; channel < decoded.numberOfChannels; channel += 1) audio[index] += decoded.getChannelData(channel)[index] / decoded.numberOfChannels;
         }
         await context.close();
+        audioBuffersRef.current[meeting.id] = { audio, url: blobUrl, blob: file };
         decodeAndTranscribe(audio, meeting);
+    };
+
+    const retryTranscription = async (fileOverride) => {
+        if (!selectedMeeting || recording || status === 'running' || selectedMeeting.state === 'transcribing') return;
+        try {
+            await ensureModels();
+            let cached = audioBuffersRef.current[selectedMeeting.id];
+            let audio = cached?.audio;
+            const fileToProcess = fileOverride instanceof File ? fileOverride : (cached?.blob instanceof File ? cached.blob : null);
+
+            if (!audio && fileToProcess) {
+                const arrayBuffer = await fileToProcess.arrayBuffer();
+                const context = new AudioContext({ sampleRate: 16_000 });
+                const decoded = await context.decodeAudioData(arrayBuffer);
+                audio = new Float32Array(decoded.length);
+                for (let index = 0; index < decoded.length; index += 1) {
+                    for (let channel = 0; channel < decoded.numberOfChannels; channel += 1) {
+                        audio[index] += decoded.getChannelData(channel)[index] / decoded.numberOfChannels;
+                    }
+                }
+                await context.close();
+                const objectUrl = URL.createObjectURL(fileToProcess);
+                setAudioUrl(objectUrl);
+                audioBuffersRef.current[selectedMeeting.id] = { audio, url: objectUrl, blob: fileToProcess };
+            }
+
+            if (!audio && audioUrl) {
+                try {
+                    const res = await fetch(audioUrl);
+                    const arrayBuffer = await res.arrayBuffer();
+                    const context = new AudioContext({ sampleRate: 16_000 });
+                    const decoded = await context.decodeAudioData(arrayBuffer);
+                    audio = new Float32Array(decoded.length);
+                    for (let index = 0; index < decoded.length; index += 1) {
+                        for (let channel = 0; channel < decoded.numberOfChannels; channel += 1) {
+                            audio[index] += decoded.getChannelData(channel)[index] / decoded.numberOfChannels;
+                        }
+                    }
+                    await context.close();
+                    audioBuffersRef.current[selectedMeeting.id] = { ...cached, audio };
+                } catch { /* continue */ }
+            }
+
+            if (!audio) {
+                if (retranscribeFileRef.current) {
+                    retranscribeFileRef.current.click();
+                    return;
+                }
+                throw new Error('No audio recording found for re-transcription.');
+            }
+
+            setError('');
+            decodeAndTranscribe(audio, selectedMeeting);
+        } catch (reason) {
+            setError(`Re-transcription error: ${reason.message}`);
+        }
     };
 
     const modelLabel = summaryModel === 'nvidia' ? 'NVIDIA Nemotron' : 'Gemini';
@@ -254,7 +316,7 @@ export default function App() {
         </aside>
         {mobileMenuOpen && <div className="sidebar-backdrop" onClick={() => setMobileMenuOpen(false)} />}
         <section className="main-panel"><header className="topbar"><div><p className="eyebrow">MEETING WORKSPACE</p><h1>{selectedMeeting?.title || 'Your meeting co-pilot'}</h1></div><div className="header-actions">{selectedMeeting && <><button onClick={renameSelected}>Rename</button><button onClick={removeSelected}>Delete</button></>}</div></header>
-            <div className="recording-console"><div className={`record-indicator ${recording ? 'live' : ''}`}><span></span><div><b>{recording ? 'Recording now' : status === 'running' || selectedMeeting?.state === 'transcribing' || selectedMeeting?.state === 'queued' ? 'Transcribing recording' : hasRecording ? 'Recording completed' : 'Ready for your next meeting'}</b><small>{recording ? formatDuration(recordingSeconds) : 'Select your mic and press record'}</small></div></div><div className="console-controls"><label className="device-select"><span>Microphone</span><select value={deviceId} onChange={(event) => setDeviceId(event.target.value)} onClick={refreshDevices}><option value="default">System default microphone</option>{devices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>)}</select></label><label className="device-select language-select"><span>Language</span><LanguageSelector language={language} setLanguage={setLanguage} /></label>{!hasRecording && !recording && <label className="upload-button">Import<input type="file" accept="audio/*,video/*" hidden onChange={(event) => importFile(event.target.files[0])} /></label>}<button className={`record-button ${recording ? 'stop' : ''}`} onClick={recording ? stopRecording : startRecording} disabled={recording ? false : (status === 'running' || hasRecording)} title={hasRecording && !recording ? 'This meeting already has a recording. Click "+ New meeting" to record again.' : ''}>{recording ? '■ Stop' : hasRecording ? '● Submitted' : '● Start recording'}</button></div></div>
+            <div className="recording-console"><div className={`record-indicator ${recording ? 'live' : ''}`}><span></span><div><b>{recording ? 'Recording now' : status === 'running' || selectedMeeting?.state === 'transcribing' || selectedMeeting?.state === 'queued' ? 'Transcribing recording' : hasRecording ? 'Recording completed' : 'Ready for your next meeting'}</b><small>{recording ? formatDuration(recordingSeconds) : 'Select your mic and press record'}</small></div></div><div className="console-controls"><label className="device-select"><span>Microphone</span><select value={deviceId} onChange={(event) => setDeviceId(event.target.value)} onClick={refreshDevices}><option value="default">System default microphone</option>{devices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>)}</select></label><label className="device-select language-select"><span>Language</span><LanguageSelector language={language} setLanguage={setLanguage} /></label>{!hasRecording && !recording ? <label className="upload-button">Import<input type="file" accept="audio/*,video/*" hidden onChange={(event) => importFile(event.target.files[0])} /></label> : <button className="subtle-button retry-transcribe-btn" onClick={() => retryTranscription()} disabled={recording || status === 'running' || selectedMeeting?.state === 'transcribing'} title="Re-run transcription with updated language/settings">↻ Re-transcribe</button>}<input ref={retranscribeFileRef} type="file" accept="audio/*,video/*" hidden onChange={(e) => { const f = e.target.files[0]; if (f) retryTranscription(f); }} /><button className={`record-button ${recording ? 'stop' : ''}`} onClick={recording ? stopRecording : startRecording} disabled={recording ? false : (status === 'running' || hasRecording)} title={hasRecording && !recording ? 'This meeting already has a recording. Click "+ New meeting" to record again.' : ''}>{recording ? '■ Stop' : hasRecording ? '● Submitted' : '● Start recording'}</button></div></div>
             {error && (
                 <div className="error-message">
                     <span>{error}</span>

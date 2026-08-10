@@ -8,14 +8,26 @@ function titleCase(str) {
         .join("");
 }
 
-// List of supported languages:
-// https://help.openai.com/en/articles/7031512-whisper-api-faq
-// https://github.com/openai/whisper/blob/248b6cb124225dd263bb9bd32d060b6517e067f8/whisper/tokenizer.py#L79
+// List of supported languages in priority order:
+// 1. Auto detect
+// 2. English
+// 3. German
+// 4. Hindi
+// 5. Marathi
+// 6. Bengali
+// 7. Tamil
+// 8. Telugu
+// 9. Rest of supported languages
 const LANGUAGES = {
     auto: "auto detect",
     en: "english",
-    zh: "chinese",
     de: "german",
+    hi: "hindi",
+    mr: "marathi",
+    bn: "bengali",
+    ta: "tamil",
+    te: "telugu",
+    zh: "chinese",
     es: "spanish/castilian",
     ru: "russian",
     ko: "korean",
@@ -30,7 +42,6 @@ const LANGUAGES = {
     sv: "swedish",
     it: "italian",
     id: "indonesian",
-    hi: "hindi",
     fi: "finnish",
     vi: "vietnamese",
     he: "hebrew",
@@ -41,7 +52,6 @@ const LANGUAGES = {
     ro: "romanian/moldavian/moldovan",
     da: "danish",
     hu: "hungarian",
-    ta: "tamil",
     no: "norwegian",
     th: "thai",
     ur: "urdu",
@@ -53,10 +63,8 @@ const LANGUAGES = {
     ml: "malayalam",
     cy: "welsh",
     sk: "slovak",
-    te: "telugu",
     fa: "persian",
     lv: "latvian",
-    bn: "bengali",
     sr: "serbian",
     az: "azerbaijani",
     sl: "slovenian",
@@ -74,7 +82,6 @@ const LANGUAGES = {
     sq: "albanian",
     sw: "swahili",
     gl: "galician",
-    mr: "marathi",
     pa: "punjabi/panjabi",
     si: "sinhala/sinhalese",
     km: "khmer",

@@ -1,37 +1,200 @@
-# Meetwise
+# MeetWise: Privacy-First In-Browser AI Meeting Co-Pilot
 
-Browser-based meeting recorder with local Whisper transcription, speaker segmentation, and Gemini 3.6 Flash-powered meeting notes.
+MeetWise is an open-source, privacy-focused AI meeting intelligence platform that delivers real-time Automatic Speech Recognition (ASR), multi-speaker diarization, structured meeting summary generation, and Retrieval-Augmented Generation (RAG) meeting chat directly within the web browser.
 
-## Features
+Audio processing and transcription take place locally using ONNX Runtime Web and WebGPU/WASM execution backends via `@huggingface/transformers`. Only plain-text transcripts are transmitted to LLM API endpoints for summarization and contextual query answering.
 
-- Record from any microphone the browser can access, including a Bluetooth headset/microphone connected to your operating system.
-- Import an existing audio or video file.
-- Keep the original transcription, speaker segments, and meeting notes in browser local storage.
-- Generate notes and refine transcripts through a server-only Gemini 2.5 Flash integration. Audio never goes to Gemini; only completed transcript text is sent when you request it.
+---
 
-## Local setup
+## Architectural Highlights
 
-```powershell
+- **Local WebGPU/WASM Inference**: Transcribes audio and segments speaker turns directly on-device using a dedicated Web Worker pipeline, eliminating audio streaming to third-party servers.
+- **Multilingual Automatic Speech Recognition**: Powered by `onnx-community/whisper-base_timestamped` with native automatic language detection and explicit `transcribe` task binding to preserve non-English scripts (including Hindi, German, Marathi, Bengali, Tamil, Telugu, etc.).
+- **Speaker Diarization**: Integrates `onnx-community/pyannote-segmentation-3.0` for frame-level audio classification and speaker turn assignment.
+- **Dual LLM Summarization Architecture**: Leverages Google Gemini 3.6 Flash as the primary JSON-structured summary provider, backed by an automatic quota recovery mechanism to NVIDIA Nemotron 3 Nano Omni (via NVIDIA NIM).
+- **RAG-Powered AI Co-Pilot**: Features a client-side Retrieval-Augmented Generation engine (`src/utils/rag.js`) that indexes meeting titles, summaries, action items, and transcripts for grounded cross-meeting Q&A.
+- **Automated Calendar Integration**: Natural Language Processing (NLP) date-time extractor (`src/utils/calendar.js`) supporting relative expressions, full days of the week (Sunday through Saturday), and 1-click Google Calendar URL generation.
+
+---
+
+## System Architecture
+
+```
+                                  BROWSER CLIENT (Local On-Device)
++-----------------------------------------------------------------------------------------------+
+|                                                                                               |
+|  Microphone / File Input ---> AudioContext (16kHz Resampling) ---> Web Worker Thread          |
+|                                                                           |                   |
+|                                                                 +---------+---------+         |
+|                                                                 |                   |         |
+|                                                          Whisper ONNX        Pyannote 3.0     |
+|                                                          ASR Model           Diarization      |
+|                                                         (WebGPU/WASM)         (WASM)          |
+|                                                                 |                   |         |
+|                                                                 +---------+---------+         |
+|                                                                           |                   |
+|                                                                 Timestamped Transcript &      |
+|                                                                 Speaker Turn Segments         |
++---------------------------------------------------------------------------|-------------------+
+                                                                            |
+                                                                    (Plain-Text Only)
+                                                                            |
+                                  SERVER ENDPOINTS (API Layer)              v
++-----------------------------------------------------------------------------------------------+
+|                                                                                               |
+|      POST /api/summarize  --------> Google Gemini 3.6 Flash (Structured JSON Schema)          |
+|                                                                                               |
+|      POST /api/summarize/nvidia -> NVIDIA Nemotron-3-Nano-Omni (Quota Exceeded Fallback)     |
+|                                                                                               |
+|      POST /api/chat & /nvidia ----> RAG-Augmented Contextual Meeting QA                       |
+|                                                                                               |
++-----------------------------------------------------------------------------------------------+
+```
+
+---
+
+## Core Technical Components
+
+### 1. In-Browser ASR & Diarization (`src/worker.js`)
+The transcription pipeline executes off the main thread inside a Dedicated Web Worker:
+- **ASR Engine**: `whisper-base_timestamped` in quantized ONNX format (`q4`/`fp32` on WebGPU, `q8` on WASM).
+- **Speaker Segmentation Engine**: `pyannote-segmentation-3.0` processing Float32 pcm frames at 16,000 Hz.
+- **Language Detection & Preservation**: Explicitly configured with `task: 'transcribe'` to prevent forced translation of foreign speech (such as Hindi or German) into English text.
+
+### 2. LLM Summarization Service (`server/gemini.js` & `server/nvidia.js`)
+Processes transcription payloads into structured JSON containing:
+- **Title**: Specific 3 to 8 word title.
+- **Overview**: Concise meeting overview.
+- **Key Decisions**: Array of agreed decisions.
+- **Action Items**: Executable task assignments with inline date detection.
+- **Scheduled Events & Plans**: Event objects containing title, description, date/day, and time.
+- **Open Questions**: Outstanding questions raised during the meeting.
+- **Refined Transcript**: Plain-text transcript cleaned of filler words.
+
+Language Preservation Rule: LLM prompts explicitly enforce language matching, requiring summaries and refined copies to output in the same script and language as the source meeting transcript.
+
+### 3. Local RAG Retrieval Engine (`src/utils/rag.js`)
+When querying the AI Co-Pilot drawer:
+1. Historical meeting data (titles, summaries, action items, transcripts) is processed into normalized token vectors.
+2. Query tokens are scored using a weighted algorithm prioritizing title exact matches, date relevance, and term frequency.
+3. Top relevant meeting contexts are injected into the Gemini or NVIDIA Nemotron chat prompt.
+
+### 4. Date & Calendar Parsing Engine (`src/utils/calendar.js`)
+- Parses relative terms (`today`, `tomorrow`, `day after tomorrow`, `this weekend`, `next week`) and explicit date formats (`August 15th`, `15/08/2026`).
+- Supports day-of-week offset calculation for all 7 days (`Sunday` through `Saturday`).
+- Generates direct Google Calendar template URLs (`https://calendar.google.com/calendar/render?action=TEMPLATE&...`).
+
+---
+
+## Directory Structure
+
+```
+MeetWise/
+├── dist/                         # Compiled production bundle output
+├── server/
+│   ├── index.js                  # Production static server & API router
+│   ├── gemini.js                 # Google Gemini API integration & schema validation
+│   └── nvidia.js                 # NVIDIA NIM Nemotron/Gemma API integration
+├── src/
+│   ├── components/
+│   │   ├── CalendarEventModal.jsx # 1-click Google Calendar scheduling modal
+│   │   ├── ChatDrawer.jsx         # RAG Co-Pilot interactive chat interface
+│   │   ├── LanguageSelector.jsx   # Prioritized multi-language selector dropdown
+│   │   ├── MediaInput.jsx         # Media file drag-and-drop decoder
+│   │   ├── Progress.jsx           # ONNX model download & WebGPU shader warmup progress
+│   │   └── Transcript.jsx         # Speaker-labeled transcript viewer & exporter
+│   ├── utils/
+│   │   ├── calendar.js            # Date extraction & Google Calendar URL builder
+│   │   └── rag.js                 # Text tokenization & meeting retrieval ranker
+│   ├── App.jsx                    # Main application state, console controls, notes UI
+│   ├── index.css                  # Vanilla CSS design system & dynamic layout styles
+│   ├── main.jsx                   # React root entry point
+│   └── worker.js                  # Web Worker running Whisper & Pyannote ONNX models
+├── index.html                     # HTML5 application shell
+├── package.json                   # Project dependencies and script declarations
+├── vite.config.js                 # Vite development server configuration & middleware
+└── .env.example                   # Environment variable template
+```
+
+---
+
+## Prerequisites & Installation
+
+### Requirements
+- Node.js 18.0.0 or higher
+- npm 9.0.0 or higher
+- WebGPU-compatible modern browser (Google Chrome 113+, Microsoft Edge 113+, or Safari 18+) with WASM fallback support
+
+### Installation Setup
+
+1. Clone the repository:
+```bash
+git clone https://github.com/BadassAman4014/MeetWise.git
+cd MeetWise
+```
+
+2. Install dependencies:
+```bash
 npm install
-npm run download-models
-Copy-Item .env.example .env
-# Add your Gemini API key to .env
+```
+
+3. Create environment configuration:
+Copy `.env.example` to `.env` in the project root:
+```bash
+cp .env.example .env
+```
+
+4. Configure API Keys in `.env`:
+```env
+GEMINI_API_KEY=your_gemini_api_key_here
+NVIDIA_API_KEY=your_nvidia_nim_api_key_here
+PORT=4173
+```
+
+---
+
+## Running the Application
+
+### Development Mode
+Runs Vite development server with API middleware proxying `/api/*` endpoints:
+```bash
 npm run dev
 ```
+Open `http://localhost:5173` in your browser.
 
-For a production-like run:
-
-```powershell
+### Production Build & Local Server
+1. Build the frontend production assets:
+```bash
 npm run build
-npm start
 ```
 
-Do not use `vite preview` for this project: it is a static server and cannot serve the protected Gemini endpoint. `npm run preview` is configured to start the application server instead.
+2. Start the Node.js production server:
+```bash
+npm start
+```
+The application will be accessible at `http://localhost:4173`.
 
-The local ONNX model files must be in `public/models/`. They are excluded from Git because of their size.
+---
 
-## Gemini key safety
+## Usage Workflow
 
-`GEMINI_API_KEY` is read only by the Node server and is never bundled into the React app. Do not prefix it with `VITE_` and do not commit `.env`.
+1. **Start Recording or Import**:
+   - Select microphone device and language (default is `Auto Detect`).
+   - Click **Start recording** or **Import** an existing audio/video file.
+2. **Transcription & Diarization**:
+   - The Web Worker loads ONNX models locally and streams transcription with speaker labels.
+3. **Automated Notes**:
+   - Notes are automatically generated via Gemini 3.6 Flash.
+   - If Gemini rate limits occur, click **Retry with NVIDIA Nemotron** to complete generation.
+4. **Re-Transcription**:
+   - To re-transcribe a meeting in another language (e.g. Hindi, German, English), update the Language Selector and click **Re-transcribe**.
+5. **Google Calendar Integration**:
+   - Click **Schedule** on action items or **Add to Google Calendar** on scheduled events to launch Google Calendar with pre-populated event details.
+6. **Co-Pilot RAG Chat**:
+   - Open the **Co-Pilot** drawer to ask questions across all recorded meetings.
 
-Bluetooth microphones must first be paired with the operating system; the browser then exposes them in the microphone selector (after granting microphone permission at least once).
+---
+
+## License
+
+This project is open source and available under the [MIT License](LICENSE).

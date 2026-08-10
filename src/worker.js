@@ -167,6 +167,7 @@ async function run({ audio, language, meetingId }) {
     const start = performance.now();
 
     const transcribeOptions = {
+        task: 'transcribe',
         return_timestamps: 'word',
         chunk_length_s: 30,
     };
