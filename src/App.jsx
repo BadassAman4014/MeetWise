@@ -1,5 +1,7 @@
 /* eslint-disable react/prop-types */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import CalendarEventModal from './components/CalendarEventModal';
+import { isSchedulableText, extractDateAndTime } from './utils/calendar';
 import LanguageSelector from './components/LanguageSelector';
 import Progress from './components/Progress';
 import Transcript from './components/Transcript';
@@ -236,12 +238,16 @@ export default function App() {
         <section className="main-panel"><header className="topbar"><div><p className="eyebrow">MEETING WORKSPACE</p><h1>{selectedMeeting?.title || 'Your meeting co-pilot'}</h1></div>{selectedMeeting && <div className="header-actions"><button onClick={renameSelected}>Rename</button><button onClick={removeSelected}>Delete</button></div>}</header>
             <div className="recording-console"><div className={`record-indicator ${recording ? 'live' : ''}`}><span></span><div><b>{recording ? 'Recording now' : status === 'running' || selectedMeeting?.state === 'transcribing' || selectedMeeting?.state === 'queued' ? 'Transcribing recording' : hasRecording ? 'Recording completed' : 'Ready for your next meeting'}</b><small>{recording ? formatDuration(recordingSeconds) : 'Select your mic and press record'}</small></div></div><div className="console-controls"><label className="device-select"><span>Microphone</span><select value={deviceId} onChange={(event) => setDeviceId(event.target.value)} onClick={refreshDevices}><option value="default">System default microphone</option>{devices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>)}</select></label><label className="device-select language-select"><span>Language</span><LanguageSelector language={language} setLanguage={setLanguage} /></label><label className="upload-button">Import<input type="file" accept="audio/*,video/*" hidden onChange={(event) => importFile(event.target.files[0])} /></label><button className={`record-button ${recording ? 'stop' : ''}`} onClick={recording ? stopRecording : startRecording} disabled={recording ? false : (status === 'running' || hasRecording)} title={hasRecording && !recording ? 'This meeting already has a recording. Click "+ New meeting" to record again.' : ''}>{recording ? '■ Stop' : hasRecording ? '● Submitted' : '● Start recording'}</button></div></div>
             {error && <p className="error-message">{error}<button onClick={() => setError('')}>×</button></p>}
-            {selectedMeeting ? <><nav className="tabs"><button className={tab === 'notes' ? 'active' : ''} onClick={() => setTab('notes')}>Notes</button><button className={tab === 'transcript' ? 'active' : ''} onClick={() => setTab('transcript')}>Full transcription</button></nav>{tab === 'notes' ? <Notes meeting={selectedMeeting} summarize={summarize} summaryModel={summaryModel} setSummaryModel={setSummaryModel} modelLabel={modelLabel} /> : <TranscriptView meeting={selectedMeeting} audioUrl={audioUrl} summarize={summarize} language={language} summaryModel={summaryModel} modelLabel={modelLabel} />}</> : <section className="welcome"><div className="orb">◌</div><h2>Capture the conversation.</h2><p>Start a recording, then get searchable speaker-aware transcription and focused meeting notes.</p><button className="record-button" onClick={startRecording}>● Start recording</button></section>}
+            {selectedMeeting ? <><nav className="tabs"><button className={tab === 'notes' ? 'active' : ''} onClick={() => setTab('notes')}>Notes</button><button className={tab === 'transcript' ? 'active' : ''} onClick={() => setTab('transcript')}>Full transcription</button></nav>{tab === 'notes' ? <Notes meeting={selectedMeeting} summarize={summarize} summaryModel={summaryModel} setSummaryModel={setSummaryModel} modelLabel={modelLabel} updateMeeting={updateMeeting} /> : <TranscriptView meeting={selectedMeeting} audioUrl={audioUrl} summarize={summarize} language={language} summaryModel={summaryModel} modelLabel={modelLabel} />}</> : <section className="welcome"><div className="orb">◌</div><h2>Capture the conversation.</h2><p>Start a recording, then get searchable speaker-aware transcription and focused meeting notes.</p><button className="record-button" onClick={startRecording}>● Start recording</button></section>}
         </section>
     </main>;
 }
 
-function Notes({ meeting, summarize, summaryModel, setSummaryModel, modelLabel }) {
+function Notes({ meeting, summarize, summaryModel, setSummaryModel, modelLabel, updateMeeting }) {
+    const [isEditing, setIsEditing] = useState(false);
+    const [editData, setEditData] = useState(null);
+    const [activeCalendarEvent, setActiveCalendarEvent] = useState(null);
+
     const isTranscribing = meeting.state === 'queued' || meeting.state === 'transcribing';
     if (isTranscribing) return (
         <section className="notes-card">
@@ -282,27 +288,310 @@ function Notes({ meeting, summarize, summaryModel, setSummaryModel, modelLabel }
         </section>
     );
 
-    const summary = typeof meeting.summary === 'string' ? { overview: meeting.summary, decisions: [], actionItems: [], openQuestions: [] } : meeting.summary;
+    const rawSummary = typeof meeting.summary === 'string'
+        ? { overview: meeting.summary, decisions: [], actionItems: [], openQuestions: [], scheduledEvents: [] }
+        : meeting.summary;
+
+    const summary = {
+        overview: rawSummary.overview || '',
+        decisions: Array.isArray(rawSummary.decisions) ? rawSummary.decisions : [],
+        actionItems: Array.isArray(rawSummary.actionItems) ? rawSummary.actionItems : [],
+        openQuestions: Array.isArray(rawSummary.openQuestions) ? rawSummary.openQuestions : [],
+        scheduledEvents: Array.isArray(rawSummary.scheduledEvents) ? rawSummary.scheduledEvents : [],
+    };
+
     const providerLabel = meeting.summaryProvider === 'nvidia' ? 'NVIDIA NEMOTRON' : 'GEMINI';
-    const List = ({ title, items }) => items?.length ? <section className="notes-section"><h3>{title}</h3><ul>{items.map((item, index) => <li key={index}>{item}</li>)}</ul></section> : null;
+
+    const startEditing = () => {
+        setEditData(JSON.parse(JSON.stringify(summary)));
+        setIsEditing(true);
+    };
+
+    const saveEdits = () => {
+        updateMeeting(meeting.id, { summary: editData });
+        setIsEditing(false);
+        setEditData(null);
+    };
+
+    const cancelEdits = () => {
+        setIsEditing(false);
+        setEditData(null);
+    };
+
+    const updateArrayItem = (key, index, value) => {
+        const next = [...(editData[key] || [])];
+        next[index] = value;
+        setEditData({ ...editData, [key]: next });
+    };
+
+    const removeArrayItem = (key, index) => {
+        const next = (editData[key] || []).filter((_, i) => i !== index);
+        setEditData({ ...editData, [key]: next });
+    };
+
+    const addArrayItem = (key, defaultVal = '') => {
+        setEditData({ ...editData, [key]: [...(editData[key] || []), defaultVal] });
+    };
+
+    const updateEventField = (index, field, value) => {
+        const events = [...(editData.scheduledEvents || [])];
+        events[index] = { ...events[index], [field]: value };
+        setEditData({ ...editData, scheduledEvents: events });
+    };
+
+    const removeEvent = (index) => {
+        const events = (editData.scheduledEvents || []).filter((_, i) => i !== index);
+        setEditData({ ...editData, scheduledEvents: events });
+    };
+
+    const addEvent = () => {
+        const newEvt = { title: 'New Event / Plan', description: '', date: 'Tomorrow', time: '10:00 AM' };
+        setEditData({ ...editData, scheduledEvents: [...(editData.scheduledEvents || []), newEvt] });
+    };
+
     return (
         <section className="notes-card">
+            {activeCalendarEvent && (
+                <CalendarEventModal
+                    initialEvent={activeCalendarEvent}
+                    onClose={() => setActiveCalendarEvent(null)}
+                />
+            )}
             <div className="notes-header">
-                <div><p className="note-kicker">{providerLabel} NOTES</p><h2>{meeting.title}</h2></div>
+                <div>
+                    <p className="note-kicker">{providerLabel} NOTES</p>
+                    <h2>{meeting.title}</h2>
+                </div>
                 <div className="notes-header-actions">
-                    <div className="model-selector">
-                        <button className={`model-option ${summaryModel === 'gemini' ? 'active' : ''}`} onClick={() => setSummaryModel('gemini')}><span className="model-dot gemini-dot"></span>Gemini</button>
-                        <button className={`model-option ${summaryModel === 'nvidia' ? 'active' : ''}`} onClick={() => setSummaryModel('nvidia')}><span className="model-dot nvidia-dot"></span>NVIDIA</button>
-                    </div>
-                    <button className="subtle-button" onClick={() => summarize('summary')}>Regenerate</button>
+                    {!isEditing ? (
+                        <>
+                            <button className="subtle-button edit-notes-btn" onClick={startEditing}>
+                                ✎ Edit Notes
+                            </button>
+                            <div className="model-selector">
+                                <button className={`model-option ${summaryModel === 'gemini' ? 'active' : ''}`} onClick={() => setSummaryModel('gemini')}>
+                                    <span className="model-dot gemini-dot"></span>Gemini
+                                </button>
+                                <button className={`model-option ${summaryModel === 'nvidia' ? 'active' : ''}`} onClick={() => setSummaryModel('nvidia')}>
+                                    <span className="model-dot nvidia-dot"></span>NVIDIA
+                                </button>
+                            </div>
+                            <button className="subtle-button" onClick={() => summarize('summary')}>Regenerate</button>
+                        </>
+                    ) : (
+                        <div className="edit-actions">
+                            <button className="subtle-button" onClick={cancelEdits}>Cancel</button>
+                            <button className="save-notes-btn" onClick={saveEdits}>✓ Save Edits</button>
+                        </div>
+                    )}
                 </div>
             </div>
-            <article className="notes-content">
-                <section className="notes-section"><h3>Summary</h3><p>{summary.overview}</p></section>
-                <List title="Key decisions" items={summary.decisions} />
-                <List title="Action items" items={summary.actionItems} />
-                <List title="Open questions" items={summary.openQuestions} />
-            </article>
+
+            {isEditing ? (
+                <div className="notes-edit-form">
+                    <section className="edit-section">
+                        <label className="edit-label">Summary Overview</label>
+                        <textarea
+                            className="edit-textarea"
+                            rows={4}
+                            value={editData.overview}
+                            onChange={(e) => setEditData({ ...editData, overview: e.target.value })}
+                        />
+                    </section>
+
+                    <section className="edit-section">
+                        <div className="section-title-row">
+                            <label className="edit-label">Key Decisions</label>
+                            <button type="button" className="add-item-btn" onClick={() => addArrayItem('decisions', 'New decision')}>+ Add Decision</button>
+                        </div>
+                        {editData.decisions.map((item, idx) => (
+                            <div key={idx} className="edit-item-row">
+                                <input
+                                    type="text"
+                                    className="edit-input"
+                                    value={item}
+                                    onChange={(e) => updateArrayItem('decisions', idx, e.target.value)}
+                                />
+                                <button type="button" className="remove-item-btn" onClick={() => removeArrayItem('decisions', idx)}>✕</button>
+                            </div>
+                        ))}
+                    </section>
+
+                    <section className="edit-section">
+                        <div className="section-title-row">
+                            <label className="edit-label">Action Items</label>
+                            <button type="button" className="add-item-btn" onClick={() => addArrayItem('actionItems', 'New action item')}>+ Add Action Item</button>
+                        </div>
+                        {editData.actionItems.map((item, idx) => (
+                            <div key={idx} className="edit-item-row">
+                                <input
+                                    type="text"
+                                    className="edit-input"
+                                    value={item}
+                                    onChange={(e) => updateArrayItem('actionItems', idx, e.target.value)}
+                                />
+                                <button type="button" className="remove-item-btn" onClick={() => removeArrayItem('actionItems', idx)}>✕</button>
+                            </div>
+                        ))}
+                    </section>
+
+                    <section className="edit-section">
+                        <div className="section-title-row">
+                            <label className="edit-label">Scheduled Events & Weekend Plans</label>
+                            <button type="button" className="add-item-btn" onClick={addEvent}>+ Add Event</button>
+                        </div>
+                        {editData.scheduledEvents.map((evt, idx) => (
+                            <div key={idx} className="edit-event-card">
+                                <div className="edit-event-grid">
+                                    <input
+                                        type="text"
+                                        className="edit-input"
+                                        placeholder="Event Title"
+                                        value={evt.title || ''}
+                                        onChange={(e) => updateEventField(idx, 'title', e.target.value)}
+                                    />
+                                    <input
+                                        type="text"
+                                        className="edit-input"
+                                        placeholder="Date / Day (e.g. Next Saturday)"
+                                        value={evt.date || ''}
+                                        onChange={(e) => updateEventField(idx, 'date', e.target.value)}
+                                    />
+                                    <input
+                                        type="text"
+                                        className="edit-input"
+                                        placeholder="Time (e.g. 10:00 AM)"
+                                        value={evt.time || ''}
+                                        onChange={(e) => updateEventField(idx, 'time', e.target.value)}
+                                    />
+                                </div>
+                                <input
+                                    type="text"
+                                    className="edit-input"
+                                    placeholder="Details / Context"
+                                    value={evt.description || ''}
+                                    onChange={(e) => updateEventField(idx, 'description', e.target.value)}
+                                />
+                                <button type="button" className="remove-item-btn" onClick={() => removeEvent(idx)}>✕ Remove Event</button>
+                            </div>
+                        ))}
+                    </section>
+
+                    <section className="edit-section">
+                        <div className="section-title-row">
+                            <label className="edit-label">Open Questions</label>
+                            <button type="button" className="add-item-btn" onClick={() => addArrayItem('openQuestions', 'New question')}>+ Add Question</button>
+                        </div>
+                        {editData.openQuestions.map((item, idx) => (
+                            <div key={idx} className="edit-item-row">
+                                <input
+                                    type="text"
+                                    className="edit-input"
+                                    value={item}
+                                    onChange={(e) => updateArrayItem('openQuestions', idx, e.target.value)}
+                                />
+                                <button type="button" className="remove-item-btn" onClick={() => removeArrayItem('openQuestions', idx)}>✕</button>
+                            </div>
+                        ))}
+                    </section>
+                </div>
+            ) : (
+                <article className="notes-content">
+                    <section className="notes-section">
+                        <h3>Summary</h3>
+                        <p>{summary.overview}</p>
+                    </section>
+
+                    {summary.decisions.length > 0 && (
+                        <section className="notes-section">
+                            <h3>Key decisions</h3>
+                            <ul>
+                                {summary.decisions.map((item, index) => (
+                                    <li key={index}>{item}</li>
+                                ))}
+                            </ul>
+                        </section>
+                    )}
+
+                    {summary.actionItems.length > 0 && (
+                        <section className="notes-section">
+                            <h3>Action items</h3>
+                            <ul className="action-items-list">
+                                {summary.actionItems.map((item, index) => {
+                                    const canSchedule = isSchedulableText(item);
+                                    if (!canSchedule) {
+                                        return <li key={index}>{item}</li>;
+                                    }
+                                    return (
+                                        <li key={index} className="action-item-row">
+                                            <span>{item}</span>
+                                            <button
+                                                className="schedule-badge-btn"
+                                                title="Schedule this action item in Google Calendar"
+                                                onClick={() => {
+                                                    const extracted = extractDateAndTime(item);
+                                                    setActiveCalendarEvent({
+                                                        title: item,
+                                                        description: `Action item from meeting: ${meeting.title}`,
+                                                        date: extracted.date,
+                                                        time: extracted.time
+                                                    });
+                                                }}
+                                            >
+                                                📅 Schedule
+                                            </button>
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        </section>
+                    )}
+
+                    {summary.scheduledEvents.length > 0 && (
+                        <section className="notes-section events-section">
+                            <h3>📅 Scheduled Events & Weekend Plans</h3>
+                            <div className="events-cards-container">
+                                {summary.scheduledEvents.map((evt, index) => (
+                                    <div key={index} className="event-card">
+                                        <div className="event-card-header">
+                                            <h4>{evt.title}</h4>
+                                            <span className="event-time-badge">
+                                                {evt.date}{evt.time ? ` @ ${evt.time}` : ''}
+                                            </span>
+                                        </div>
+                                        {evt.description && <p className="event-card-desc">{evt.description}</p>}
+                                        <button
+                                            className="gcal-card-btn"
+                                            onClick={() => {
+                                                const fallback = extractDateAndTime(`${evt.title} ${evt.description || ''}`);
+                                                setActiveCalendarEvent({
+                                                    title: evt.title,
+                                                    description: evt.description || `Discussed during ${meeting.title}`,
+                                                    date: evt.date || fallback.date,
+                                                    time: evt.time || fallback.time
+                                                });
+                                            }}
+                                        >
+                                            ✦ Add to Google Calendar
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </section>
+                    )}
+
+                    {summary.openQuestions.length > 0 && (
+                        <section className="notes-section">
+                            <h3>Open questions</h3>
+                            <ul>
+                                {summary.openQuestions.map((item, index) => (
+                                    <li key={index}>{item}</li>
+                                ))}
+                            </ul>
+                        </section>
+                    )}
+                </article>
+            )}
         </section>
     );
 }

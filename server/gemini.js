@@ -9,16 +9,30 @@ const responseSchema = {
         decisions: { type: 'array', items: { type: 'string' } },
         actionItems: { type: 'array', items: { type: 'string' } },
         openQuestions: { type: 'array', items: { type: 'string' } },
+        scheduledEvents: {
+            type: 'array',
+            description: 'Events, weekend plans, or follow-ups explicitly scheduled or discussed with a timeframe.',
+            items: {
+                type: 'object',
+                properties: {
+                    title: { type: 'string', description: 'Event title or summary of what is scheduled.' },
+                    description: { type: 'string', description: 'Brief context or details about the event.' },
+                    date: { type: 'string', description: 'Mentioned date or relative day (e.g. "Next Saturday", "This weekend", "Tomorrow").' },
+                    time: { type: 'string', description: 'Mentioned time (e.g. "10:00 AM", "2:30 PM") or empty string if unspecified.' }
+                },
+                required: ['title', 'description', 'date']
+            }
+        },
         refinedTranscript: { type: 'string', description: 'A clean, readable plain-text transcript. Do not use Markdown, headings, title labels, separators, or commentary.' },
     },
-    required: ['title', 'overview', 'decisions', 'actionItems', 'openQuestions', 'refinedTranscript'],
+    required: ['title', 'overview', 'decisions', 'actionItems', 'openQuestions', 'scheduledEvents', 'refinedTranscript'],
 };
 
 export function promptFor({ task, transcript }) {
     const taskInstruction = task === 'refine'
-        ? 'Prioritize the refinedTranscript field, retaining every meaningful detail. Still provide concise structured meeting fields when possible.'
-        : 'Prioritize an accurate overview, decisions, action items, and open questions. Still provide a clean refined transcript.';
-    return `Analyze this meeting transcript. ${taskInstruction} Do not invent facts, people, dates, owners, or decisions.\n\nRespond ONLY with a JSON object containing these fields: title (string), overview (string), decisions (array of strings), actionItems (array of strings), openQuestions (array of strings), refinedTranscript (string).\n\nTranscript:\n${transcript}`;
+        ? 'Prioritize the refinedTranscript field, retaining every meaningful detail. Still provide concise structured meeting fields and scheduled events when possible.'
+        : 'Prioritize an accurate overview, decisions, action items, open questions, and any scheduled events/weekend plans/follow-up commitments mentioned with timeframes.';
+    return `Analyze this meeting transcript. ${taskInstruction} Do not invent facts, people, dates, owners, or decisions.\n\nRespond ONLY with a JSON object containing these fields: title (string), overview (string), decisions (array of strings), actionItems (array of strings), openQuestions (array of strings), scheduledEvents (array of objects with title, description, date, time), refinedTranscript (string).\n\nTranscript:\n${transcript}`;
 }
 
 /** Try multiple strategies to extract a JSON object from a string. */
@@ -58,6 +72,7 @@ export function normalizeResult(obj) {
         decisions: Array.isArray(obj.decisions) ? obj.decisions : [],
         actionItems: Array.isArray(obj.actionItems) ? obj.actionItems : (Array.isArray(obj.action_items) ? obj.action_items : []),
         openQuestions: Array.isArray(obj.openQuestions) ? obj.openQuestions : (Array.isArray(obj.open_questions) ? obj.open_questions : []),
+        scheduledEvents: Array.isArray(obj.scheduledEvents) ? obj.scheduledEvents : (Array.isArray(obj.scheduled_events) ? obj.scheduled_events : []),
         refinedTranscript: obj.refinedTranscript || obj.refined_transcript || '',
     };
 }
