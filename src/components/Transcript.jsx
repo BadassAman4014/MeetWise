@@ -212,7 +212,7 @@ export default function Transcript({ transcript, segments = [], currentTime, set
 
             {/* ── Footer ── */}
             <div className="dt-footer">
-                <span className="dt-lang-badge"><GlobeIcon /> Language: {language === 'auto' ? 'Auto-detect' : (language ? language.toUpperCase() : 'Auto-detect')}</span>
+                <span className="dt-lang-badge"><GlobeIcon /> Language: {language ? language.toUpperCase() : 'EN'}</span>
                 <div className="dt-export-group">
                     <button className="dt-export-btn" onClick={downloadJSON}>
                         <DownloadIcon /> Export Transcript

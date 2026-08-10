@@ -19,7 +19,6 @@ function titleCase(str) {
 // 8. Telugu
 // 9. Rest of supported languages
 const LANGUAGES = {
-    auto: "auto detect",
     en: "english",
     de: "german",
     hi: "hindi",

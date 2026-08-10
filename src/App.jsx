@@ -45,7 +45,7 @@ export default function App() {
     const [recordingSeconds, setRecordingSeconds] = useState(0);
     const [devices, setDevices] = useState([]);
     const [deviceId, setDeviceId] = useState('default');
-    const [language, setLanguage] = useState('auto');
+    const [language, setLanguage] = useState('en');
     const [tab, setTab] = useState('notes');
     const [error, setError] = useState('');
     const [audioUrl, setAudioUrl] = useState('');
@@ -73,9 +73,25 @@ export default function App() {
         worker.current = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
         const onMessage = ({ data }) => {
             if (data.status === 'loading') { setStatus('loading'); setLoadingMessage(data.data); }
-            if (data.status === 'initiate') setProgressItems((items) => [...items, data]);
-            if (data.status === 'progress') setProgressItems((items) => items.map((item) => item.file === data.file ? { ...item, ...data } : item));
-            if (data.status === 'done') setProgressItems((items) => items.filter((item) => item.file !== data.file));
+            if (data.status === 'initiate') {
+                setProgressItems((items) => {
+                    const exists = items.some((item) => item.file === data.file);
+                    if (exists) return items;
+                    return [...items, { file: data.file, name: data.name, progress: 0, loaded: 0, total: 0, status: 'downloading' }];
+                });
+            }
+            if (data.status === 'progress') {
+                setProgressItems((items) => {
+                    const exists = items.some((item) => item.file === data.file);
+                    if (!exists) {
+                        return [...items, { file: data.file, name: data.name, progress: data.progress || 0, loaded: data.loaded || 0, total: data.total || 0, status: 'downloading' }];
+                    }
+                    return items.map((item) => item.file === data.file ? { ...item, ...data, status: 'downloading' } : item);
+                });
+            }
+            if (data.status === 'done') {
+                setProgressItems((items) => items.map((item) => item.file === data.file ? { ...item, progress: 100, status: 'done' } : item));
+            }
             if (data.status === 'loaded') { setStatus('ready'); loadReady.current?.resolve(); loadReady.current = null; }
             if (data.status === 'complete') { updateMeeting(data.meetingId, { ...data.result, state: 'complete', processingTime: data.time }); setStatus('ready'); setTab('notes'); autoSummarize.current?.(data.meetingId, data.result.transcript); }
             if (data.status === 'error') { setError(data.error || 'The audio could not be processed.'); setStatus('ready'); loadReady.current?.reject(new Error(data.error)); loadReady.current = null; }
@@ -117,6 +133,18 @@ export default function App() {
     };
 
     const createMeeting = () => {
+        if (selectedMeeting && selectedMeeting.state === 'new') {
+            setTab('notes');
+            setAudioUrl('');
+            return;
+        }
+        const existingNewMeeting = meetings.find((item) => item.state === 'new');
+        if (existingNewMeeting) {
+            setSelectedId(existingNewMeeting.id);
+            setTab('notes');
+            setAudioUrl('');
+            return;
+        }
         const meeting = { id: newId(), title: 'Untitled meeting', createdAt: Date.now(), duration: 0, state: 'new' };
         setMeetings((items) => [meeting, ...items]); setSelectedId(meeting.id); setTab('notes'); setAudioUrl('');
     };
@@ -287,8 +315,61 @@ export default function App() {
 
     const hasRecording = selectedMeeting && selectedMeeting.state !== 'new';
 
+    const totalLoaded = progressItems.reduce((acc, item) => acc + (item.loaded || 0), 0);
+    const totalSize = progressItems.reduce((acc, item) => acc + (item.total || 0), 0);
+    const overallPercentage = totalSize > 0
+        ? Math.min(100, Math.round((totalLoaded / totalSize) * 100))
+        : (progressItems.length > 0 ? Math.round(progressItems.reduce((acc, item) => acc + (item.progress || 0), 0) / progressItems.length) : 0);
+
     return <main className="meeting-app">
-        {status === 'loading' && <div className="model-overlay"><div className="progress-panel"><p>{loadingMessage}</p>{progressItems.map(({ file, progress, total }) => <Progress key={file} text={file} percentage={progress} total={total} />)}</div></div>}
+        {status === 'loading' && (
+            <div className="model-overlay">
+                <div className="progress-panel">
+                    <div className="progress-header">
+                        <div className="progress-header-icon">
+                            <div className="glowing-orb">◒</div>
+                        </div>
+                        <div className="progress-header-text">
+                            <h3>Loading AI Models</h3>
+                            <p>{loadingMessage || 'Initializing Whisper & Pyannote neural networks...'}</p>
+                        </div>
+                        <div className="hardware-badge">
+                            {navigator.gpu ? '⚡ WebGPU' : '⚙️ WASM'}
+                        </div>
+                    </div>
+
+                    {progressItems.length > 0 && (
+                        <div className="aggregate-progress">
+                            <div className="aggregate-info">
+                                <span>Overall Download Progress</span>
+                                <span>{overallPercentage}%</span>
+                            </div>
+                            <div className="aggregate-track">
+                                <div className="aggregate-bar" style={{ width: `${overallPercentage}%` }} />
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="progress-items-list">
+                        {progressItems.map(({ file, progress, total, loaded, status: itemStatus }) => (
+                            <Progress
+                                key={file}
+                                text={file}
+                                percentage={progress}
+                                total={total}
+                                loaded={loaded}
+                                status={itemStatus}
+                            />
+                        ))}
+                    </div>
+
+                    <div className="progress-footer">
+                        <span className="privacy-badge">🔒 100% Private & On-Device</span>
+                        <span className="info-subtext">Cached locally in browser storage for instant offline transcription.</span>
+                    </div>
+                </div>
+            </div>
+        )}
         <aside className={`sidebar ${mobileMenuOpen ? 'mobile-open' : ''}`}>
             <div className="sidebar-header">
                 <div className="brand-group">

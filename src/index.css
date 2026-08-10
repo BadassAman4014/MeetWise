@@ -1490,3 +1490,296 @@
     background: rgba(255, 80, 80, 0.15);
     color: #ff5050;
 }
+
+/* ═══════════════════════════════════════════════════════
+   Model Loading Modal Overlay & Progress Bars (Monochrome B&W Theme)
+   ═══════════════════════════════════════════════════════ */
+.model-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    animation: overlayFadeIn 0.3s ease-out;
+}
+
+@keyframes overlayFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.progress-panel {
+    width: 100%;
+    max-width: 520px;
+    background: #121212;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 20px;
+    padding: 28px 30px;
+    box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.9);
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    animation: panelPopIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes panelPopIn {
+    from { opacity: 0; transform: scale(0.94) translateY(10px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.progress-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.progress-header-icon {
+    flex-shrink: 0;
+}
+
+.progress-header-icon .glowing-orb {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: #ffffff;
+    color: #000000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+    box-shadow: 0 4px 18px rgba(255, 255, 255, 0.25);
+    animation: orbPulse 2s ease-in-out infinite alternate;
+}
+
+@keyframes orbPulse {
+    0% { transform: scale(1); box-shadow: 0 4px 18px rgba(255, 255, 255, 0.2); }
+    100% { transform: scale(1.06); box-shadow: 0 6px 24px rgba(255, 255, 255, 0.4); }
+}
+
+.progress-header-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.progress-header-text h3 {
+    margin: 0 0 3px 0;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #ffffff;
+    letter-spacing: -0.01em;
+}
+
+.progress-header-text p {
+    margin: 0;
+    font-size: 0.8rem;
+    color: #a1a1aa;
+    line-height: 1.35;
+}
+
+.hardware-badge {
+    flex-shrink: 0;
+    padding: 6px 12px;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+/* Aggregate Overall Progress */
+.aggregate-progress {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.aggregate-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #e4e4e7;
+}
+
+.aggregate-track {
+    width: 100%;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    overflow: hidden;
+}
+
+.aggregate-bar {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #ffffff, #a1a1aa);
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+}
+
+/* Progress Items List */
+.progress-items-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 260px;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+
+.progress-items-list::-webkit-scrollbar {
+    width: 4px;
+}
+.progress-items-list::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+}
+
+.progress-item {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: all 0.2s ease;
+}
+
+.progress-item.is-done {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+.progress-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.progress-item-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+}
+
+.progress-file-icon {
+    font-size: 0.82rem;
+    color: #ffffff;
+    flex-shrink: 0;
+}
+
+.progress-item.is-done .progress-file-icon {
+    color: #ffffff;
+}
+
+.progress-file-name {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #ffffff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.progress-raw-path {
+    font-size: 0.7rem;
+    color: #71717a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: none;
+}
+
+@media (min-width: 480px) {
+    .progress-raw-path { display: inline; }
+}
+
+.progress-item-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.progress-size {
+    font-size: 0.72rem;
+    color: #a1a1aa;
+    font-variant-numeric: tabular-nums;
+}
+
+.progress-percent-badge {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #ffffff;
+    font-variant-numeric: tabular-nums;
+    min-width: 36px;
+    text-align: right;
+}
+
+.progress-item.is-done .progress-percent-badge {
+    color: #ffffff;
+}
+
+.progress-bar-track {
+    width: 100%;
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #ffffff, #a1a1aa);
+    transition: width 0.25s ease-out;
+}
+
+.progress-bar-fill.done-fill {
+    background: linear-gradient(90deg, #ffffff, #d4d4d8);
+}
+
+.progress-footer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding-top: 4px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    text-align: center;
+}
+
+.privacy-badge {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #a1a1aa;
+}
+
+.info-subtext {
+    font-size: 0.68rem;
+    color: #71717a;
+}
+
+@media (max-width: 480px) {
+    .progress-panel { padding: 20px; border-radius: 16px; }
+    .progress-header-text h3 { font-size: 1rem; }
+    .hardware-badge { display: none; }
+}
+

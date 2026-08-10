@@ -11,7 +11,7 @@ const responseSchema = {
         openQuestions: { type: 'array', items: { type: 'string' } },
         scheduledEvents: {
             type: 'array',
-            description: 'Events, weekend plans, or follow-ups explicitly scheduled or discussed with a timeframe.',
+            description: 'ONLY include future events, appointments, or meetings explicitly scheduled or committed to with a specific date, day, or time (e.g. "Doctor appointment next Saturday", "Client sync tomorrow at 3 PM"). Do NOT blindly include general discussion items, past events, or continuous work. Return an empty array [] if no calendar-worthy event was explicitly scheduled.',
             items: {
                 type: 'object',
                 properties: {
@@ -30,9 +30,9 @@ const responseSchema = {
 
 export function promptFor({ task, transcript }) {
     const taskInstruction = task === 'refine'
-        ? 'Prioritize the refinedTranscript field, retaining every meaningful detail. Still provide concise structured meeting fields and scheduled events when possible.'
-        : 'Prioritize an accurate overview, decisions, action items, open questions, and any scheduled events/weekend plans/follow-up commitments mentioned with timeframes.';
-    return `Analyze this meeting transcript. ${taskInstruction}\n\nCRITICAL LANGUAGE INSTRUCTION:\nDetect the primary language of the transcript below. You MUST generate all output fields (title, overview, decisions, actionItems, openQuestions, scheduledEvents, and refinedTranscript) in the SAME language/script as the meeting transcript (e.g. if the transcript is in Hindi / Devanagari or Hinglish, output all notes and refinedTranscript in Hindi / Hinglish; if Spanish, output in Spanish; if English, output in English). DO NOT translate non-English transcripts into English unless explicitly asked.\n\nRespond ONLY with a JSON object containing these fields: title (string), overview (string), decisions (array of strings), actionItems (array of strings), openQuestions (array of strings), scheduledEvents (array of objects with title, description, date, time), refinedTranscript (string).\n\nTranscript:\n${transcript}`;
+        ? 'Prioritize the refinedTranscript field, retaining every meaningful detail. Still provide concise structured meeting fields and scheduled events when explicitly warranted.'
+        : 'Prioritize an accurate overview, decisions, action items, open questions, and scheduled events.';
+    return `Analyze this meeting transcript carefully and generate structured meeting notes.\n\nCRITICAL CALENDAR & SCHEDULING RULE:\nBe INTELLIGENT and DISCERNING about 'scheduledEvents'. ONLY include an item in 'scheduledEvents' IF the transcript contains an explicit commitment, appointment, meeting, deadline, or future plan scheduled or agreed upon with a specific date, day, or time (e.g. "Doctor appointment next Saturday at 11am", "Project deadline on August 20th", "Follow-up call tomorrow at 3 PM").\nDO NOT blindly create calendar reservations or suggestions for past events, general thoughts, ongoing tasks, or vague ideas without explicit schedule commitments. If no explicit calendar reservation or event was scheduled, set 'scheduledEvents' to an EMPTY array [].\n\nCRITICAL LANGUAGE INSTRUCTION:\nDetect the primary language of the transcript below. You MUST generate all output fields (title, overview, decisions, actionItems, openQuestions, scheduledEvents, and refinedTranscript) in the SAME language/script as the meeting transcript (e.g. if the transcript is in Hindi / Devanagari or Hinglish, output all notes and refinedTranscript in Hindi / Hinglish; if Spanish, output in Spanish; if English, output in English). DO NOT translate non-English transcripts into English unless explicitly asked.\n\nRespond ONLY with a JSON object containing these fields: title (string), overview (string), decisions (array of strings), actionItems (array of strings), openQuestions (array of strings), scheduledEvents (array of objects with title, description, date, time), refinedTranscript (string).\n\nTranscript:\n${transcript}`;
 }
 
 /** Try multiple strategies to extract a JSON object from a string. */
@@ -66,13 +66,24 @@ export function extractJson(raw) {
 
 /** Ensure all expected fields exist with sensible defaults. */
 export function normalizeResult(obj) {
+    const rawEvents = Array.isArray(obj.scheduledEvents) ? obj.scheduledEvents : (Array.isArray(obj.scheduled_events) ? obj.scheduled_events : []);
+    const validEvents = rawEvents.filter(evt => {
+        if (!evt || typeof evt !== 'object') return false;
+        const title = (evt.title || '').trim().toLowerCase();
+        const date = (evt.date || '').trim().toLowerCase();
+        if (!title || title.length < 3) return false;
+        if (title.includes('n/a') || title.includes('none') || title.includes('no event') || title.includes('no scheduled')) return false;
+        if (date.includes('n/a') || date.includes('none') || date.includes('no date') || date.includes('unspecified')) return false;
+        return true;
+    });
+
     return {
         title: obj.title || 'Untitled meeting',
         overview: obj.overview || obj.summary || '',
         decisions: Array.isArray(obj.decisions) ? obj.decisions : [],
         actionItems: Array.isArray(obj.actionItems) ? obj.actionItems : (Array.isArray(obj.action_items) ? obj.action_items : []),
         openQuestions: Array.isArray(obj.openQuestions) ? obj.openQuestions : (Array.isArray(obj.open_questions) ? obj.open_questions : []),
-        scheduledEvents: Array.isArray(obj.scheduledEvents) ? obj.scheduledEvents : (Array.isArray(obj.scheduled_events) ? obj.scheduled_events : []),
+        scheduledEvents: validEvents,
         refinedTranscript: obj.refinedTranscript || obj.refined_transcript || '',
     };
 }
