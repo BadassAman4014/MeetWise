@@ -2,14 +2,16 @@
 import { createReadStream, existsSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 import { createServer } from 'node:http';
-import { handleSummarize } from './gemini.js';
-import { handleNvidiaSummarize } from './nvidia.js';
+import { handleSummarize, handleChat } from './gemini.js';
+import { handleNvidiaSummarize, handleNvidiaChat } from './nvidia.js';
 
 const root = join(process.cwd(), 'dist');
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.wasm': 'application/wasm', '.svg': 'image/svg+xml', '.png': 'image/png', '.webm': 'video/webm' };
 
 createServer(async (request, response) => {
     const url = new URL(request.url, `http://${request.headers.host}`);
+    if (url.pathname === '/api/chat/nvidia') return handleNvidiaChat(request, response);
+    if (url.pathname === '/api/chat') return handleChat(request, response);
     if (url.pathname === '/api/summarize/nvidia') return handleNvidiaSummarize(request, response);
     if (url.pathname === '/api/summarize') return handleSummarize(request, response);
 

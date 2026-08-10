@@ -119,3 +119,69 @@ export async function handleSummarize(request, response) {
         response.end(JSON.stringify({ error: error.message || 'Unable to summarize this meeting.' }));
     }
 }
+
+const chatResponseSchema = {
+    type: 'object',
+    properties: {
+        answer: { type: 'string', description: 'A helpful, accurate, grounded answer based strictly on the provided meeting contexts. Mention specific meeting details, dates, and speakers when relevant.' },
+        sources: {
+            type: 'array',
+            description: 'List of meetings explicitly referenced or used to construct the answer.',
+            items: {
+                type: 'object',
+                properties: {
+                    meetingId: { type: 'string', description: 'ID of the meeting referenced.' },
+                    title: { type: 'string', description: 'Title of the meeting referenced.' }
+                },
+                required: ['meetingId', 'title']
+            }
+        }
+    },
+    required: ['answer', 'sources']
+};
+
+export async function handleChat(request, response) {
+    if (request.method !== 'POST') { response.writeHead(405, { Allow: 'POST' }).end(); return; }
+    try {
+        const { question, contextMeetings } = await readJson(request);
+        if (!question?.trim()) throw new Error('A question is required.');
+        if (!process.env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY is not configured on the server.');
+
+        const formattedContext = Array.isArray(contextMeetings) && contextMeetings.length > 0
+            ? contextMeetings.map((m, idx) => `--- MEETING ${idx + 1} ---\nID: ${m.id}\nTitle: ${m.title}\nDate: ${m.date || 'Unspecified'}\nExcerpt / Transcript:\n${m.excerpt}`).join('\n\n')
+            : 'No relevant meeting transcripts found.';
+
+        const prompt = `You are MeetWise AI Co-Pilot, an intelligent assistant helping the user recall information from their recorded meetings.\n\nUser Question: "${question}"\n\nProvided Meeting Contexts:\n${formattedContext}\n\nInstructions:\n1. Thoroughly review ALL provided meeting titles, dates, summary overviews, key decisions, action items, scheduled events, and transcripts.\n2. Answer the user's question accurately, concisely, and completely. When asked about appointments, follow-ups, doctors, meetings, or scheduled plans, check ALL meeting titles and scheduled events in the context.\n3. Be flexible with terms: "follow-up", "appointment", "consultation", "visit", and "meeting" can refer to the same events.\n4. Populate the 'sources' array with the ID and Title of any meetings you referenced in your answer.\n5. If truly no information exists anywhere in the provided meetings, state that you could not find information about it in the recorded meetings.\n\nRespond ONLY with a JSON object matching this structure: { "answer": "...", "sources": [{ "meetingId": "...", "title": "..." }] }`;
+
+        const upstream = await fetch(GEMINI_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
+            body: JSON.stringify({
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                generationConfig: {
+                    temperature: 0.2,
+                    responseMimeType: 'application/json',
+                    responseSchema: chatResponseSchema,
+                },
+            }),
+        });
+
+        const payload = await upstream.json();
+        if (!upstream.ok) throw new Error(payload?.error?.message || 'Gemini returned an error.');
+
+        const raw = payload.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('').trim();
+        if (!raw) throw new Error('Gemini returned an empty response.');
+
+        const parsed = extractJson(raw);
+        if (!parsed || typeof parsed !== 'object') throw new Error('Could not parse Gemini answer.');
+
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify({
+            answer: parsed.answer || 'No response generated.',
+            sources: Array.isArray(parsed.sources) ? parsed.sources : []
+        }));
+    } catch (error) {
+        response.writeHead(400, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify({ error: error.message || 'Unable to answer chat query.' }));
+    }
+}

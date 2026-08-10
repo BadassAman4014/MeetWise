@@ -1,6 +1,7 @@
 /* eslint-disable react/prop-types */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import CalendarEventModal from './components/CalendarEventModal';
+import ChatDrawer from './components/ChatDrawer';
 import { isSchedulableText, extractDateAndTime } from './utils/calendar';
 import LanguageSelector from './components/LanguageSelector';
 import Progress from './components/Progress';
@@ -48,6 +49,7 @@ export default function App() {
     const [audioUrl, setAudioUrl] = useState('');
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [summaryModel, setSummaryModel] = useState('gemini');
+    const [chatOpen, setChatOpen] = useState(false);
 
     const selectedMeeting = meetings.find((meeting) => meeting.id === selectedId) || null;
     const updateMeeting = useCallback((id, changes) => setMeetings((items) => items.map((item) => item.id === id ? { ...item, ...changes } : item)), []);
@@ -101,54 +103,34 @@ export default function App() {
                 ? { deviceId: { ideal: targetDeviceId }, echoCancellation: true, noiseSuppression: true }
                 : { echoCancellation: true, noiseSuppression: true };
             return await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
-        } catch (firstErr) {
-            console.warn('Ideal audio constraints failed, trying basic audio stream', firstErr);
-            // Fallback for mobile browsers that reject specific constraints
+        } catch {
             return await navigator.mediaDevices.getUserMedia({ audio: true });
         }
     };
 
-    const decodeAndTranscribe = useCallback(async (blob, meeting) => {
-        try {
-            const context = new AudioContext({ sampleRate: 16_000 });
-            const decoded = await context.decodeAudioData(await blob.arrayBuffer());
-            const audio = new Float32Array(decoded.length);
-            for (let index = 0; index < decoded.length; index += 1) {
-                for (let channel = 0; channel < decoded.numberOfChannels; channel += 1) audio[index] += decoded.getChannelData(channel)[index] / decoded.numberOfChannels;
-            }
-            await context.close();
-            setStatus('running');
-            updateMeeting(meeting.id, { state: 'transcribing' });
-            worker.current.postMessage({ type: 'run', data: { audio, language, meetingId: meeting.id } });
-        } catch (reason) { updateMeeting(meeting.id, { state: 'error' }); setError(`Could not decode the recording: ${reason.message}`); }
-    }, [language, updateMeeting]);
+    const decodeAndTranscribe = (audioSource, targetMeeting) => {
+        setStatus('running');
+        updateMeeting(targetMeeting.id, { state: 'transcribing' });
+        worker.current.postMessage({ type: 'run', data: { audio: audioSource, language, meetingId: targetMeeting.id } });
+    };
 
     const createMeeting = () => {
-        const meeting = { id: newId(), title: `Meeting · ${formatDate(Date.now())}`, createdAt: Date.now(), duration: 0, state: 'new' };
-        setMeetings((items) => [meeting, ...items]); setSelectedId(meeting.id); setTab('notes');
+        const meeting = { id: newId(), title: 'Untitled meeting', createdAt: Date.now(), duration: 0, state: 'new' };
+        setMeetings((items) => [meeting, ...items]); setSelectedId(meeting.id); setTab('notes'); setAudioUrl('');
     };
 
     const startRecording = async () => {
         let stream;
         try {
-            stream = await getAudioStream(deviceId);
-        } catch (reason) {
-            return setError(`Microphone access error: ${reason.message}`);
-        }
-        try {
             await ensureModels();
-            await refreshDevices();
+            stream = await getAudioStream(deviceId);
             mediaStream.current = stream;
             const chunks = [];
             const recorder = new MediaRecorder(stream);
             mediaRecorder.current = recorder;
-            // Reuse selected meeting if it hasn't been recorded yet, otherwise create a new one
-            let meeting;
-            if (selectedMeeting && selectedMeeting.state === 'new') {
-                meeting = selectedMeeting;
-                updateMeeting(meeting.id, { state: 'recording' });
-            } else {
-                meeting = { id: newId(), title: `Meeting · ${formatDate(Date.now())}`, createdAt: Date.now(), duration: 0, state: 'recording' };
+            let meeting = selectedMeeting;
+            if (!meeting || hasRecording) {
+                meeting = { id: newId(), title: 'Untitled meeting', createdAt: Date.now(), duration: 0, state: 'queued' };
                 setMeetings((items) => [meeting, ...items]); setSelectedId(meeting.id);
             }
             setTab('notes');
@@ -159,7 +141,18 @@ export default function App() {
                 const duration = (Date.now() - recordingStart.current) / 1000;
                 updateMeeting(meeting.id, { duration, state: 'queued' });
                 stream.getTracks().forEach((track) => track.stop());
-                decodeAndTranscribe(blob, meeting);
+                
+                const processRecording = async () => {
+                    const context = new AudioContext({ sampleRate: 16_000 });
+                    const decoded = await context.decodeAudioData(await blob.arrayBuffer());
+                    const audio = new Float32Array(decoded.length);
+                    for (let index = 0; index < decoded.length; index += 1) {
+                        for (let channel = 0; channel < decoded.numberOfChannels; channel += 1) audio[index] += decoded.getChannelData(channel)[index] / decoded.numberOfChannels;
+                    }
+                    await context.close();
+                    decodeAndTranscribe(audio, meeting);
+                };
+                processRecording().catch(reason => { updateMeeting(meeting.id, { state: 'error' }); setError(`Could not decode the recording: ${reason.message}`); });
             };
             recordingStart.current = Date.now(); setRecordingSeconds(0); setRecording(true); recorder.start(1000);
         } catch (reason) {
@@ -175,7 +168,15 @@ export default function App() {
         const meeting = { id: newId(), title: 'Untitled meeting', createdAt: Date.now(), duration: 0, state: 'queued' };
         setMeetings((items) => [meeting, ...items]); setSelectedId(meeting.id); setTab('transcript');
         setAudioUrl((oldUrl) => { if (oldUrl) URL.revokeObjectURL(oldUrl); return URL.createObjectURL(file); });
-        decodeAndTranscribe(file, meeting);
+        
+        const context = new AudioContext({ sampleRate: 16_000 });
+        const decoded = await context.decodeAudioData(await file.arrayBuffer());
+        const audio = new Float32Array(decoded.length);
+        for (let index = 0; index < decoded.length; index += 1) {
+            for (let channel = 0; channel < decoded.numberOfChannels; channel += 1) audio[index] += decoded.getChannelData(channel)[index] / decoded.numberOfChannels;
+        }
+        await context.close();
+        decodeAndTranscribe(audio, meeting);
     };
 
     const modelLabel = summaryModel === 'nvidia' ? 'NVIDIA Nemotron' : 'Gemini';
@@ -223,7 +224,10 @@ export default function App() {
                     </button>
                     <div className="brand"><i>◒</i><span>meetwise</span></div>
                 </div>
-                <button className="new-meeting" onClick={() => { createMeeting(); setMobileMenuOpen(false); }} disabled={recording || status === 'running'}>+ New meeting</button>
+                <div className="sidebar-actions">
+                    <button className="new-meeting" onClick={() => { createMeeting(); setMobileMenuOpen(false); }} disabled={recording || status === 'running'}>+ New meeting</button>
+                    <button className="ask-copilot-sidebar-btn" onClick={() => { setChatOpen(true); setMobileMenuOpen(false); }}>💬 Ask Co-Pilot</button>
+                </div>
             </div>
             <div className="sidebar-body">
                 <div className="sidebar-body-header">
@@ -231,15 +235,22 @@ export default function App() {
                     <button className="close-menu-btn" onClick={() => setMobileMenuOpen(false)}>✕</button>
                 </div>
                 <div className="meeting-list">{meetings.length ? meetings.map((meeting) => <MeetingCard key={meeting.id} meeting={meeting} active={meeting.id === selectedId} onClick={() => { setSelectedId(meeting.id); setMobileMenuOpen(false); }} />) : <p className="empty-list">Your recorded meetings will appear here.</p>}</div>
-                <div className="privacy-note">TRANSCRIPTION STAYS ON THIS DEVICE<br />Only transcript text is sent to the AI model when you ask for notes.</div>
+                <div className="privacy-note">TRANSCRIPTION STAYS ON THIS DEVICE<br />Only transcript text is sent to the AI model when you ask for notes or chat.</div>
             </div>
         </aside>
         {mobileMenuOpen && <div className="sidebar-backdrop" onClick={() => setMobileMenuOpen(false)} />}
-        <section className="main-panel"><header className="topbar"><div><p className="eyebrow">MEETING WORKSPACE</p><h1>{selectedMeeting?.title || 'Your meeting co-pilot'}</h1></div>{selectedMeeting && <div className="header-actions"><button onClick={renameSelected}>Rename</button><button onClick={removeSelected}>Delete</button></div>}</header>
+        <section className="main-panel"><header className="topbar"><div><p className="eyebrow">MEETING WORKSPACE</p><h1>{selectedMeeting?.title || 'Your meeting co-pilot'}</h1></div><div className="header-actions"><button className="ask-copilot-btn" onClick={() => setChatOpen(true)}>💬 Ask Co-Pilot</button>{selectedMeeting && <><button onClick={renameSelected}>Rename</button><button onClick={removeSelected}>Delete</button></>}</div></header>
             <div className="recording-console"><div className={`record-indicator ${recording ? 'live' : ''}`}><span></span><div><b>{recording ? 'Recording now' : status === 'running' || selectedMeeting?.state === 'transcribing' || selectedMeeting?.state === 'queued' ? 'Transcribing recording' : hasRecording ? 'Recording completed' : 'Ready for your next meeting'}</b><small>{recording ? formatDuration(recordingSeconds) : 'Select your mic and press record'}</small></div></div><div className="console-controls"><label className="device-select"><span>Microphone</span><select value={deviceId} onChange={(event) => setDeviceId(event.target.value)} onClick={refreshDevices}><option value="default">System default microphone</option>{devices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>)}</select></label><label className="device-select language-select"><span>Language</span><LanguageSelector language={language} setLanguage={setLanguage} /></label><label className="upload-button">Import<input type="file" accept="audio/*,video/*" hidden onChange={(event) => importFile(event.target.files[0])} /></label><button className={`record-button ${recording ? 'stop' : ''}`} onClick={recording ? stopRecording : startRecording} disabled={recording ? false : (status === 'running' || hasRecording)} title={hasRecording && !recording ? 'This meeting already has a recording. Click "+ New meeting" to record again.' : ''}>{recording ? '■ Stop' : hasRecording ? '● Submitted' : '● Start recording'}</button></div></div>
             {error && <p className="error-message">{error}<button onClick={() => setError('')}>×</button></p>}
             {selectedMeeting ? <><nav className="tabs"><button className={tab === 'notes' ? 'active' : ''} onClick={() => setTab('notes')}>Notes</button><button className={tab === 'transcript' ? 'active' : ''} onClick={() => setTab('transcript')}>Full transcription</button></nav>{tab === 'notes' ? <Notes meeting={selectedMeeting} summarize={summarize} summaryModel={summaryModel} setSummaryModel={setSummaryModel} modelLabel={modelLabel} updateMeeting={updateMeeting} /> : <TranscriptView meeting={selectedMeeting} audioUrl={audioUrl} summarize={summarize} language={language} summaryModel={summaryModel} modelLabel={modelLabel} />}</> : <section className="welcome"><div className="orb">◌</div><h2>Capture the conversation.</h2><p>Start a recording, then get searchable speaker-aware transcription and focused meeting notes.</p><button className="record-button" onClick={startRecording}>● Start recording</button></section>}
         </section>
+
+        <ChatDrawer
+            isOpen={chatOpen}
+            onClose={() => setChatOpen(false)}
+            meetings={meetings}
+            onSelectMeeting={setSelectedId}
+        />
     </main>;
 }
 
@@ -497,6 +508,39 @@ function Notes({ meeting, summarize, summaryModel, setSummaryModel, modelLabel, 
                 </div>
             ) : (
                 <article className="notes-content">
+                    {summary.scheduledEvents.length > 0 && (
+                        <section className="notes-section events-section">
+                            <h3>📅 Scheduled Events & Weekend Plans</h3>
+                            <div className="events-cards-container">
+                                {summary.scheduledEvents.map((evt, index) => (
+                                    <div key={index} className="event-card">
+                                        <div className="event-card-header">
+                                            <h4>{evt.title}</h4>
+                                            <span className="event-time-badge">
+                                                {evt.date}{evt.time ? ` @ ${evt.time}` : ''}
+                                            </span>
+                                        </div>
+                                        {evt.description && <p className="event-card-desc">{evt.description}</p>}
+                                        <button
+                                            className="gcal-card-btn"
+                                            onClick={() => {
+                                                const fallback = extractDateAndTime(`${evt.title} ${evt.description || ''}`);
+                                                setActiveCalendarEvent({
+                                                    title: evt.title,
+                                                    description: evt.description || `Discussed during ${meeting.title}`,
+                                                    date: evt.date || fallback.date,
+                                                    time: evt.time || fallback.time
+                                                });
+                                            }}
+                                        >
+                                            ✦ Add to Google Calendar
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </section>
+                    )}
+
                     <section className="notes-section">
                         <h3>Summary</h3>
                         <p>{summary.overview}</p>
@@ -544,39 +588,6 @@ function Notes({ meeting, summarize, summaryModel, setSummaryModel, modelLabel, 
                                     );
                                 })}
                             </ul>
-                        </section>
-                    )}
-
-                    {summary.scheduledEvents.length > 0 && (
-                        <section className="notes-section events-section">
-                            <h3>📅 Scheduled Events & Weekend Plans</h3>
-                            <div className="events-cards-container">
-                                {summary.scheduledEvents.map((evt, index) => (
-                                    <div key={index} className="event-card">
-                                        <div className="event-card-header">
-                                            <h4>{evt.title}</h4>
-                                            <span className="event-time-badge">
-                                                {evt.date}{evt.time ? ` @ ${evt.time}` : ''}
-                                            </span>
-                                        </div>
-                                        {evt.description && <p className="event-card-desc">{evt.description}</p>}
-                                        <button
-                                            className="gcal-card-btn"
-                                            onClick={() => {
-                                                const fallback = extractDateAndTime(`${evt.title} ${evt.description || ''}`);
-                                                setActiveCalendarEvent({
-                                                    title: evt.title,
-                                                    description: evt.description || `Discussed during ${meeting.title}`,
-                                                    date: evt.date || fallback.date,
-                                                    time: evt.time || fallback.time
-                                                });
-                                            }}
-                                        >
-                                            ✦ Add to Google Calendar
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
                         </section>
                     )}
 
