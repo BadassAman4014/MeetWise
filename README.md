@@ -1,10 +1,15 @@
 # MeetWise: Privacy-First In-Browser AI Meeting Co-Pilot
 
 [![Live Demo](https://img.shields.io/badge/%F0%9F%9A%80%20Live%20Demo-meetwise--ba0b.onrender.com-4F46E5?style=for-the-badge&logo=render&logoColor=white)](https://meetwise-ba0b.onrender.com/)
+[![Android Release](https://img.shields.io/badge/%F0%9F%93%B1%20Android-Release%20APK-3DDC84?style=for-the-badge&logo=android&logoColor=white)](APK/app-release.apk)
+[![Android Debug](https://img.shields.io/badge/%F0%9F%90%9B%20Android-Debug%20APK-607D8B?style=for-the-badge&logo=android&logoColor=white)](APK/app-debug.apk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-10B981.svg?style=for-the-badge)](LICENSE)
 
 > 🌐 **LIVE APPLICATION**: Experience MeetWise live in your browser:  
-> 👉 [**https://meetwise-ba0b.onrender.com/**](https://meetwise-ba0b.onrender.com/) 👈
+> 👉 [**https://meetwise-ba0b.onrender.com/**](https://meetwise-ba0b.onrender.com/) 👈  
+>  
+> 📱 **ANDROID APKS**: Download the native Android application builds directly:  
+> 📦 [**Download Release APK (`app-release.apk`)**](APK/app-release.apk) | 🐛 [**Download Debug APK (`app-debug.apk`)**](APK/app-debug.apk)
 
 ---
 
@@ -14,13 +19,15 @@ Audio processing and transcription take place locally using ONNX Runtime Web and
 
 ---
 
-## 🌐 Live Web Application
+## 🌐 Live Application & Mobile Downloads
 
-The application is deployed and ready to test live on Render:
+The application is deployed live on Render and available as pre-built Android APKs:
 
-| Service | Public URL | Status |
+| Platform / Artifact | Link / Download | Description |
 | :--- | :--- | :--- |
-| **MeetWise Live Web App** | [**https://meetwise-ba0b.onrender.com/**](https://meetwise-ba0b.onrender.com/) | 🟢 **Live** |
+| **MeetWise Live Web App** | [**https://meetwise-ba0b.onrender.com/**](https://meetwise-ba0b.onrender.com/) | 🟢 **Live Web Application** |
+| **Android App (Release)** | [**APK/app-release.apk**](APK/app-release.apk) | 📦 **Production Release Build (43.6 MB)** |
+| **Android App (Debug)** | [**APK/app-debug.apk**](APK/app-debug.apk) | 🐛 **Developer Debug Build (66.2 MB)** |
 
 ---
 
@@ -147,6 +154,9 @@ When querying the AI Co-Pilot drawer:
 
 ```
 MeetWise/
+├── APK/                          # Android application APK packages
+│   ├── app-release.apk           # Production Android release build
+│   └── app-debug.apk             # Developer Android debug build
 ├── dist/                         # Compiled production bundle output
 ├── server/
 │   ├── index.js                  # Production static server & API router
