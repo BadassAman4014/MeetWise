@@ -1,8 +1,65 @@
 # MeetWise: Privacy-First In-Browser AI Meeting Co-Pilot
 
+[![Live Demo](https://img.shields.io/badge/%F0%9F%9A%80%20Live%20Demo-meetwise--ba0b.onrender.com-4F46E5?style=for-the-badge&logo=render&logoColor=white)](https://meetwise-ba0b.onrender.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-10B981.svg?style=for-the-badge)](LICENSE)
+
+> 🌐 **LIVE APPLICATION**: Experience MeetWise live in your browser:  
+> 👉 [**https://meetwise-ba0b.onrender.com/**](https://meetwise-ba0b.onrender.com/) 👈
+
+---
+
 MeetWise is an open-source, privacy-focused AI meeting intelligence platform that delivers real-time Automatic Speech Recognition (ASR), multi-speaker diarization, structured meeting summary generation, and Retrieval-Augmented Generation (RAG) meeting chat directly within the web browser.
 
 Audio processing and transcription take place locally using ONNX Runtime Web and WebGPU/WASM execution backends via `@huggingface/transformers`. Only plain-text transcripts are transmitted to LLM API endpoints for summarization and contextual query answering.
+
+---
+
+## 🌐 Live Web Application
+
+The application is deployed and ready to test live on Render:
+
+| Service | Public URL | Status |
+| :--- | :--- | :--- |
+| **MeetWise Live Web App** | [**https://meetwise-ba0b.onrender.com/**](https://meetwise-ba0b.onrender.com/) | 🟢 **Live** |
+
+---
+
+## 📸 Screenshots & Feature Walkthrough
+
+MeetWise is built with a responsive design tailored for both mobile devices and desktop screens.
+
+### 📱 Mobile Experience
+
+| Mobile Meeting Workspace | Meeting History Drawer | Mobile RAG Co-Pilot |
+| :---: | :---: | :---: |
+| ![Mobile Workspace](assets/mobile-workspace.jpeg) | ![Mobile History Drawer](assets/mobile-history-drawer.jpeg) | ![Mobile Co-Pilot](assets/mobile-copilot-drawer.jpeg) |
+
+---
+
+### 💻 Desktop Experience & Features
+
+#### 1. Main Meeting Workspace & Audio Input Controls
+Select your microphone input or drag-and-drop audio/video files with automatic language detection or explicit multi-language selection.
+![Meeting Workspace](assets/desktop-workspace.png)
+
+#### 2. Structured AI Notes & Google Calendar Integration
+Automatically generates meeting overview, key decisions, action items, and 1-click Google Calendar scheduling links for detected follow-up appointments.
+![AI Notes & Calendar Integration](assets/desktop-notes-calendar.png)
+
+#### 3. In-Browser Speaker Diarization & Audio Waveform Player
+Segments speaker turns (Speaker 1, Speaker 2) with timestamped chunks, interactive audio playback waveform, and Gemini-refined transcripts.
+![Speaker Diarization & Full Transcription View](assets/desktop-diarization-transcript.png)
+
+#### 4. AI RAG Co-Pilot & Cross-Meeting Intelligence
+Ask natural language questions across recorded meetings using local Retrieval-Augmented Generation with direct context citations.
+
+| Co-Pilot Drawer Interface | Dual Model Switching (Gemini & NVIDIA Nemotron) |
+| :---: | :---: |
+| ![Co-Pilot Drawer](assets/desktop-copilot-drawer.png) | ![Model Provider Toggle](assets/desktop-copilot-models.png) |
+
+| Context-Aware Meeting Q&A | Multi-Meeting Retrieval & Citations |
+| :---: | :---: |
+| ![Appointment Querying](assets/desktop-copilot-qa.png) | ![Cross-Meeting Intelligence](assets/desktop-copilot-nemotron.png) |
 
 ---
 
