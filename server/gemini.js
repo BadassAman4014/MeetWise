@@ -14,15 +14,15 @@ const responseSchema = {
     required: ['title', 'overview', 'decisions', 'actionItems', 'openQuestions', 'refinedTranscript'],
 };
 
-function promptFor({ task, transcript }) {
+export function promptFor({ task, transcript }) {
     const taskInstruction = task === 'refine'
         ? 'Prioritize the refinedTranscript field, retaining every meaningful detail. Still provide concise structured meeting fields when possible.'
         : 'Prioritize an accurate overview, decisions, action items, and open questions. Still provide a clean refined transcript.';
-    return `Analyze this meeting transcript. ${taskInstruction} Do not invent facts, people, dates, owners, or decisions.\n\nTranscript:\n${transcript}`;
+    return `Analyze this meeting transcript. ${taskInstruction} Do not invent facts, people, dates, owners, or decisions.\n\nRespond ONLY with a JSON object containing these fields: title (string), overview (string), decisions (array of strings), actionItems (array of strings), openQuestions (array of strings), refinedTranscript (string).\n\nTranscript:\n${transcript}`;
 }
 
 /** Try multiple strategies to extract a JSON object from a string. */
-function extractJson(raw) {
+export function extractJson(raw) {
     if (!raw) return null;
 
     // Strategy 1: direct parse
@@ -51,7 +51,7 @@ function extractJson(raw) {
 }
 
 /** Ensure all expected fields exist with sensible defaults. */
-function normalizeResult(obj) {
+export function normalizeResult(obj) {
     return {
         title: obj.title || 'Untitled meeting',
         overview: obj.overview || obj.summary || '',
@@ -62,7 +62,7 @@ function normalizeResult(obj) {
     };
 }
 
-async function readJson(request) {
+export async function readJson(request) {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
     return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');

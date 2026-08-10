@@ -45,6 +45,7 @@ export default function App() {
     const [error, setError] = useState('');
     const [audioUrl, setAudioUrl] = useState('');
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+    const [summaryModel, setSummaryModel] = useState('gemini');
 
     const selectedMeeting = meetings.find((meeting) => meeting.id === selectedId) || null;
     const updateMeeting = useCallback((id, changes) => setMeetings((items) => items.map((item) => item.id === id ? { ...item, ...changes } : item)), []);
@@ -175,25 +176,28 @@ export default function App() {
         decodeAndTranscribe(file, meeting);
     };
 
+    const modelLabel = summaryModel === 'nvidia' ? 'NVIDIA Nemotron' : 'Gemini';
+
     const summarize = useCallback(async (task, meetingId, overrideTranscript) => {
         const targetId = meetingId || selectedId;
         const target = meetings.find((m) => m.id === targetId);
         const text = getTranscriptText(overrideTranscript || target);
-        if (!text) return setError('Finish transcription before using Gemini.');
+        if (!text) return setError('Finish transcription before summarizing.');
         updateMeeting(targetId, { summaryState: task });
+        const endpoint = summaryModel === 'nvidia' ? '/api/summarize/nvidia' : '/api/summarize';
         try {
-            const response = await fetch('/api/summarize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task, transcript: text, title: target?.title || 'Meeting' }) });
+            const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task, transcript: text, title: target?.title || 'Meeting' }) });
             const rawResponse = await response.text();
             let payload;
             try { payload = rawResponse ? JSON.parse(rawResponse) : {}; } catch { throw new Error(`Summary service returned an invalid response (HTTP ${response.status}). Run the app with npm run dev or npm start, not npm run preview.`); }
-            if (!response.ok) throw new Error(payload.error || `Gemini summary service failed (HTTP ${response.status}). Add GEMINI_API_KEY to .env, then restart the app.`);
-            if (!payload.result) throw new Error('Gemini returned no structured meeting data.');
-            const sharedChanges = { title: payload.result.title || target?.title, summaryState: null };
+            if (!response.ok) throw new Error(payload.error || `${modelLabel} summary service failed (HTTP ${response.status}).`);
+            if (!payload.result) throw new Error(`${modelLabel} returned no structured meeting data.`);
+            const sharedChanges = { title: payload.result.title || target?.title, summaryState: null, summaryProvider: summaryModel };
             updateMeeting(targetId, task === 'summary'
                 ? { ...sharedChanges, summary: { overview: payload.result.overview, decisions: payload.result.decisions, actionItems: payload.result.actionItems, openQuestions: payload.result.openQuestions }, refinedTranscript: payload.result.refinedTranscript }
                 : { ...sharedChanges, refinedTranscript: payload.result.refinedTranscript });
         } catch (reason) { updateMeeting(targetId, { summaryState: null }); setError(reason.message); }
-    }, [meetings, selectedId, updateMeeting]);
+    }, [meetings, selectedId, updateMeeting, summaryModel, modelLabel]);
 
     const autoSummarize = useRef(null);
     useEffect(() => { autoSummarize.current = (id, transcript) => summarize('summary', id, transcript); }, [summarize]);
@@ -225,19 +229,19 @@ export default function App() {
                     <button className="close-menu-btn" onClick={() => setMobileMenuOpen(false)}>✕</button>
                 </div>
                 <div className="meeting-list">{meetings.length ? meetings.map((meeting) => <MeetingCard key={meeting.id} meeting={meeting} active={meeting.id === selectedId} onClick={() => { setSelectedId(meeting.id); setMobileMenuOpen(false); }} />) : <p className="empty-list">Your recorded meetings will appear here.</p>}</div>
-                <div className="privacy-note">TRANSCRIPTION STAYS ON THIS DEVICE<br />Only transcript text is sent to Gemini when you ask for notes.</div>
+                <div className="privacy-note">TRANSCRIPTION STAYS ON THIS DEVICE<br />Only transcript text is sent to the AI model when you ask for notes.</div>
             </div>
         </aside>
         {mobileMenuOpen && <div className="sidebar-backdrop" onClick={() => setMobileMenuOpen(false)} />}
         <section className="main-panel"><header className="topbar"><div><p className="eyebrow">MEETING WORKSPACE</p><h1>{selectedMeeting?.title || 'Your meeting co-pilot'}</h1></div>{selectedMeeting && <div className="header-actions"><button onClick={renameSelected}>Rename</button><button onClick={removeSelected}>Delete</button></div>}</header>
             <div className="recording-console"><div className={`record-indicator ${recording ? 'live' : ''}`}><span></span><div><b>{recording ? 'Recording now' : status === 'running' || selectedMeeting?.state === 'transcribing' || selectedMeeting?.state === 'queued' ? 'Transcribing recording' : hasRecording ? 'Recording completed' : 'Ready for your next meeting'}</b><small>{recording ? formatDuration(recordingSeconds) : 'Select your mic and press record'}</small></div></div><div className="console-controls"><label className="device-select"><span>Microphone</span><select value={deviceId} onChange={(event) => setDeviceId(event.target.value)} onClick={refreshDevices}><option value="default">System default microphone</option>{devices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>)}</select></label><label className="device-select language-select"><span>Language</span><LanguageSelector language={language} setLanguage={setLanguage} /></label><label className="upload-button">Import<input type="file" accept="audio/*,video/*" hidden onChange={(event) => importFile(event.target.files[0])} /></label><button className={`record-button ${recording ? 'stop' : ''}`} onClick={recording ? stopRecording : startRecording} disabled={recording ? false : (status === 'running' || hasRecording)} title={hasRecording && !recording ? 'This meeting already has a recording. Click "+ New meeting" to record again.' : ''}>{recording ? '■ Stop' : hasRecording ? '● Submitted' : '● Start recording'}</button></div></div>
             {error && <p className="error-message">{error}<button onClick={() => setError('')}>×</button></p>}
-            {selectedMeeting ? <><nav className="tabs"><button className={tab === 'notes' ? 'active' : ''} onClick={() => setTab('notes')}>Notes</button><button className={tab === 'transcript' ? 'active' : ''} onClick={() => setTab('transcript')}>Full transcription</button></nav>{tab === 'notes' ? <Notes meeting={selectedMeeting} summarize={summarize} /> : <TranscriptView meeting={selectedMeeting} audioUrl={audioUrl} summarize={summarize} language={language} />}</> : <section className="welcome"><div className="orb">◌</div><h2>Capture the conversation.</h2><p>Start a recording, then get searchable speaker-aware transcription and focused meeting notes.</p><button className="record-button" onClick={startRecording}>● Start recording</button></section>}
+            {selectedMeeting ? <><nav className="tabs"><button className={tab === 'notes' ? 'active' : ''} onClick={() => setTab('notes')}>Notes</button><button className={tab === 'transcript' ? 'active' : ''} onClick={() => setTab('transcript')}>Full transcription</button></nav>{tab === 'notes' ? <Notes meeting={selectedMeeting} summarize={summarize} summaryModel={summaryModel} setSummaryModel={setSummaryModel} modelLabel={modelLabel} /> : <TranscriptView meeting={selectedMeeting} audioUrl={audioUrl} summarize={summarize} language={language} summaryModel={summaryModel} modelLabel={modelLabel} />}</> : <section className="welcome"><div className="orb">◌</div><h2>Capture the conversation.</h2><p>Start a recording, then get searchable speaker-aware transcription and focused meeting notes.</p><button className="record-button" onClick={startRecording}>● Start recording</button></section>}
         </section>
     </main>;
 }
 
-function Notes({ meeting, summarize }) {
+function Notes({ meeting, summarize, summaryModel, setSummaryModel, modelLabel }) {
     const isTranscribing = meeting.state === 'queued' || meeting.state === 'transcribing';
     if (isTranscribing) return (
         <section className="notes-card">
@@ -263,7 +267,7 @@ function Notes({ meeting, summarize }) {
                 <div className="dots-loader" style={{ marginBottom: '16px' }}>
                     <span></span><span></span><span></span>
                 </div>
-                <h3>Gemini is turning this meeting into notes...</h3>
+                <h3>{modelLabel} is turning this meeting into notes...</h3>
                 <p className="loading-subtext">Extracting overview, key decisions, action items, and open questions.</p>
             </div>
         </section>
@@ -273,18 +277,25 @@ function Notes({ meeting, summarize }) {
         <section className="notes-card empty-notes">
             <p className="note-kicker">AI MEETING NOTES</p>
             <h2>{meeting.state === 'complete' ? 'Generating notes…' : 'Turn this conversation into clarity.'}</h2>
-            <p>{meeting.state === 'complete' ? 'Gemini is automatically analysing the transcript. This usually takes a few seconds.' : 'Notes will be generated automatically once transcription completes.'}</p>
+            <p>{meeting.state === 'complete' ? `${modelLabel} is automatically analysing the transcript. This usually takes a few seconds.` : 'Notes will be generated automatically once transcription completes.'}</p>
             {meeting.state === 'complete' && <button className="gemini-button" onClick={() => summarize('summary')}>✦ Retry generating notes</button>}
         </section>
     );
 
     const summary = typeof meeting.summary === 'string' ? { overview: meeting.summary, decisions: [], actionItems: [], openQuestions: [] } : meeting.summary;
+    const providerLabel = meeting.summaryProvider === 'nvidia' ? 'NVIDIA NEMOTRON' : 'GEMINI';
     const List = ({ title, items }) => items?.length ? <section className="notes-section"><h3>{title}</h3><ul>{items.map((item, index) => <li key={index}>{item}</li>)}</ul></section> : null;
     return (
         <section className="notes-card">
             <div className="notes-header">
-                <div><p className="note-kicker">GEMINI NOTES</p><h2>{meeting.title}</h2></div>
-                <button className="subtle-button" onClick={() => summarize('summary')}>Regenerate</button>
+                <div><p className="note-kicker">{providerLabel} NOTES</p><h2>{meeting.title}</h2></div>
+                <div className="notes-header-actions">
+                    <div className="model-selector">
+                        <button className={`model-option ${summaryModel === 'gemini' ? 'active' : ''}`} onClick={() => setSummaryModel('gemini')}><span className="model-dot gemini-dot"></span>Gemini</button>
+                        <button className={`model-option ${summaryModel === 'nvidia' ? 'active' : ''}`} onClick={() => setSummaryModel('nvidia')}><span className="model-dot nvidia-dot"></span>NVIDIA</button>
+                    </div>
+                    <button className="subtle-button" onClick={() => summarize('summary')}>Regenerate</button>
+                </div>
             </div>
             <article className="notes-content">
                 <section className="notes-section"><h3>Summary</h3><p>{summary.overview}</p></section>
@@ -296,7 +307,7 @@ function Notes({ meeting, summarize }) {
     );
 }
 
-function TranscriptView({ meeting, audioUrl, summarize, language }) {
+function TranscriptView({ meeting, audioUrl, summarize, language, summaryModel, modelLabel }) {
     const audioRef = useRef(null);
     const [currentTime, setCurrentTime] = useState(0);
     const isBusy = meeting.state === 'queued' || meeting.state === 'transcribing';
@@ -308,7 +319,8 @@ function TranscriptView({ meeting, audioUrl, summarize, language }) {
 
     if (isBusy) return <section className="transcript-panel"><div className="shimmer">{meeting.state === 'queued' ? 'Preparing your audio…' : 'Whisper is transcribing and identifying speakers…'}</div></section>;
     if (!meeting.transcript) return <section className="transcript-panel">No transcript is available yet.</section>;
-    return <section className="transcript-panel">{audioUrl && <audio ref={audioRef} style={{ display: 'none' }} src={audioUrl} onTimeUpdate={(e) => setCurrentTime(e.target.currentTime)} onLoadedMetadata={() => setCurrentTime(0)} />}<Transcript className="transcript-body" transcript={meeting.transcript} segments={meeting.segments || []} currentTime={currentTime} setCurrentTime={seekTo} audioRef={audioRef} language={language} />{meeting.refinedTranscript && <div className="refined-copy"><p className="note-kicker">GEMINI-REFINED COPY</p><p>{meeting.refinedTranscript}</p></div>}<button className="gemini-button refine-button" onClick={() => summarize('refine')} disabled={meeting.summaryState === 'refine'}>{meeting.summaryState === 'refine' ? '✦ Refining transcript…' : '✦ Refine with Gemini'}</button></section>;
+    const refineProvider = meeting.summaryProvider === 'nvidia' ? 'NVIDIA NEMOTRON' : 'GEMINI';
+    return <section className="transcript-panel">{audioUrl && <audio ref={audioRef} style={{ display: 'none' }} src={audioUrl} onTimeUpdate={(e) => setCurrentTime(e.target.currentTime)} onLoadedMetadata={() => setCurrentTime(0)} />}<Transcript className="transcript-body" transcript={meeting.transcript} segments={meeting.segments || []} currentTime={currentTime} setCurrentTime={seekTo} audioRef={audioRef} language={language} />{meeting.refinedTranscript && <div className="refined-copy"><p className="note-kicker">{refineProvider}-REFINED COPY</p><p>{meeting.refinedTranscript}</p></div>}<button className="gemini-button refine-button" onClick={() => summarize('refine')} disabled={meeting.summaryState === 'refine'}>{meeting.summaryState === 'refine' ? `✦ Refining with ${modelLabel}…` : `✦ Refine with ${modelLabel}`}</button></section>;
 }
 
 
