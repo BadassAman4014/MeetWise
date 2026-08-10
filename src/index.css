@@ -1289,22 +1289,29 @@
 
 .chat-input-form {
     display: flex;
+    align-items: flex-end;
     gap: 8px;
-    padding: 16px 20px;
+    padding: 12px 20px 16px;
     border-top: 1px solid #22222a;
     background: #141418;
 }
 
-.chat-input-form input {
+.chat-textarea {
     flex: 1;
+    min-height: 40px;
+    max-height: 120px;
     padding: 10px 14px;
     border: 1px solid #333342;
-    border-radius: 9px;
+    border-radius: 12px;
     background: #09090b;
     color: #ffffff;
     font-size: 0.86rem;
+    font-family: inherit;
+    line-height: 1.45;
+    resize: none;
+    overflow-y: auto;
 }
-.chat-input-form input:focus {
+.chat-textarea:focus {
     outline: none;
     border-color: #1a73e8;
 }
