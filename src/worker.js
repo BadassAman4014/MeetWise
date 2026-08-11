@@ -5,15 +5,15 @@ import {
     AutoModelForAudioFrameClassification,
 } from '@huggingface/transformers';
 
-// Allow local models first, but allow remote fallback from Hugging Face CDN if not bundled locally
-env.allowLocalModels = true;
+// Default to remote model loading first unless local model is verified
+env.allowLocalModels = false;
 env.allowRemoteModels = true;
 env.localModelPath = '/models/';
 
 const PER_DEVICE_CONFIG = {
     webgpu: {
         dtype: {
-            encoder_model: 'fp32',
+            encoder_model: 'fp16',
             decoder_model_merged: 'q4',
         },
         device: 'webgpu',
@@ -24,11 +24,21 @@ const PER_DEVICE_CONFIG = {
     },
 };
 
+const checkLocalModelExists = async (folderName) => {
+    try {
+        const res = await fetch(`/models/${folderName}/config.json`, { method: 'GET' });
+        const contentType = res.headers.get('content-type') || '';
+        return res.ok && contentType.includes('application/json');
+    } catch {
+        return false;
+    }
+};
+
 /**
  * This class uses the Singleton pattern to ensure that only one instance of the model is loaded.
  */
 class PipelineSingleton {
-    static asr_model_id = 'whisper-base_timestamped';
+    static asr_model_id = 'whisper-large-v3-turbo_timestamped';
     static asr_instance = null;
     static currentDevice = null;
 
@@ -36,21 +46,33 @@ class PipelineSingleton {
     static segmentation_instance = null;
     static segmentation_processor = null;
 
-    static async getInstance(progress_callback = null, device = 'webgpu') {
-        if (this.currentDevice !== device) {
+    static async getInstance(progress_callback = null, device = 'webgpu', modelId = 'whisper-large-v3-turbo_timestamped') {
+        if (this.currentDevice !== device || this.asr_model_id !== modelId) {
             this.asr_instance = null;
             this.currentDevice = device;
+            this.asr_model_id = modelId;
         }
 
         const loadAsr = async () => {
+            const localModelId = this.asr_model_id.includes('/') ? this.asr_model_id.split('/').pop() : this.asr_model_id;
+            const remoteModelId = this.asr_model_id.includes('/') ? this.asr_model_id : `onnx-community/${this.asr_model_id}`;
+
+            const isLocalAvailable = await checkLocalModelExists(localModelId);
+            env.allowLocalModels = isLocalAvailable;
+            env.allowRemoteModels = true;
+
+            const targetModel = isLocalAvailable ? localModelId : remoteModelId;
+
             try {
-                return await pipeline('automatic-speech-recognition', this.asr_model_id, {
+                return await pipeline('automatic-speech-recognition', targetModel, {
                     ...PER_DEVICE_CONFIG[device],
                     progress_callback,
                 });
             } catch (err) {
-                console.warn('Local ASR model not found, fetching remote model from Hugging Face Hub:', err);
-                return await pipeline('automatic-speech-recognition', 'onnx-community/whisper-base_timestamped', {
+                console.warn(`ASR model (${targetModel}) load failed, retrying directly from Hugging Face Hub (${remoteModelId}):`, err);
+                env.allowLocalModels = false;
+                env.allowRemoteModels = true;
+                return await pipeline('automatic-speech-recognition', remoteModelId, {
                     ...PER_DEVICE_CONFIG[device],
                     progress_callback,
                 });
@@ -58,24 +80,38 @@ class PipelineSingleton {
         };
 
         const loadSegProcessor = async () => {
+            const isLocalAvailable = await checkLocalModelExists(this.segmentation_model_id);
+            env.allowLocalModels = isLocalAvailable;
+            env.allowRemoteModels = true;
+            const targetModel = isLocalAvailable ? this.segmentation_model_id : `onnx-community/${this.segmentation_model_id}`;
+            
             try {
-                return await AutoProcessor.from_pretrained(this.segmentation_model_id, { progress_callback });
+                return await AutoProcessor.from_pretrained(targetModel, { progress_callback });
             } catch (err) {
-                console.warn('Local segmentation processor not found, fetching remote:', err);
-                return await AutoProcessor.from_pretrained('onnx-community/pyannote-segmentation-3.0', { progress_callback });
+                console.warn('Local segmentation processor failed, retrying remote:', err);
+                env.allowLocalModels = false;
+                env.allowRemoteModels = true;
+                return await AutoProcessor.from_pretrained(`onnx-community/${this.segmentation_model_id}`, { progress_callback });
             }
         };
 
         const loadSegModel = async () => {
+            const isLocalAvailable = await checkLocalModelExists(this.segmentation_model_id);
+            env.allowLocalModels = isLocalAvailable;
+            env.allowRemoteModels = true;
+            const targetModel = isLocalAvailable ? this.segmentation_model_id : `onnx-community/${this.segmentation_model_id}`;
+            
             try {
-                return await AutoModelForAudioFrameClassification.from_pretrained(this.segmentation_model_id, {
+                return await AutoModelForAudioFrameClassification.from_pretrained(targetModel, {
                     device: 'wasm',
                     dtype: 'fp32',
                     progress_callback,
                 });
             } catch (err) {
-                console.warn('Local segmentation model not found, fetching remote:', err);
-                return await AutoModelForAudioFrameClassification.from_pretrained('onnx-community/pyannote-segmentation-3.0', {
+                console.warn('Local segmentation model failed, retrying remote:', err);
+                env.allowLocalModels = false;
+                env.allowRemoteModels = true;
+                return await AutoModelForAudioFrameClassification.from_pretrained(`onnx-community/${this.segmentation_model_id}`, {
                     device: 'wasm',
                     dtype: 'fp32',
                     progress_callback,
@@ -89,24 +125,29 @@ class PipelineSingleton {
                 throw err;
             });
         }
+        const asr = await this.asr_instance;
+
         if (!this.segmentation_processor) {
             this.segmentation_processor = loadSegProcessor().catch((err) => {
                 this.segmentation_processor = null;
                 throw err;
             });
         }
+        const segProc = await this.segmentation_processor;
+
         if (!this.segmentation_instance) {
             this.segmentation_instance = loadSegModel().catch((err) => {
                 this.segmentation_instance = null;
                 throw err;
             });
         }
+        const segModel = await this.segmentation_instance;
 
-        return Promise.all([this.asr_instance, this.segmentation_processor, this.segmentation_instance]);
+        return [asr, segProc, segModel];
     }
 }
 
-async function load({ device }) {
+async function load({ device, modelId = 'whisper-large-v3-turbo_timestamped' }) {
     self.postMessage({
         status: 'loading',
         data: `Loading models (${device})...`
@@ -116,7 +157,7 @@ async function load({ device }) {
     try {
         [transcriber] = await PipelineSingleton.getInstance(x => {
             self.postMessage(x);
-        }, device);
+        }, device, modelId);
     } catch (err) {
         if (device === 'webgpu') {
             console.warn('WebGPU failed, falling back to WASM backend:', err);
@@ -127,7 +168,7 @@ async function load({ device }) {
             device = 'wasm';
             [transcriber] = await PipelineSingleton.getInstance(x => {
                 self.postMessage(x);
-            }, 'wasm');
+            }, 'wasm', modelId);
         } else {
             throw err;
         }
@@ -160,9 +201,9 @@ async function segment(processor, model, audio) {
     return segments;
 }
 
-async function run({ audio, language, meetingId }) {
+async function run({ audio, language, meetingId, modelId }) {
     const device = PipelineSingleton.currentDevice || 'wasm';
-    const [transcriber, segmentation_processor, segmentation_model] = await PipelineSingleton.getInstance(null, device);
+    const [transcriber, segmentation_processor, segmentation_model] = await PipelineSingleton.getInstance(null, device, modelId);
 
     const start = performance.now();
 
@@ -202,3 +243,4 @@ self.addEventListener('message', async (e) => {
         self.postMessage({ status: 'error', error: error.message || String(error) });
     }
 });
+

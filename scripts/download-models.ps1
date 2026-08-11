@@ -3,6 +3,7 @@ $modelsDirectory = Join-Path $PSScriptRoot '..\public\models'
 New-Item -ItemType Directory -Force -Path $modelsDirectory | Out-Null
 
 $repositories = @(
+    @{ Name = 'whisper-large-v3-turbo_timestamped'; Url = 'https://huggingface.co/onnx-community/whisper-large-v3-turbo_timestamped.git' },
     @{ Name = 'whisper-base_timestamped'; Url = 'https://huggingface.co/onnx-community/whisper-base_timestamped.git' },
     @{ Name = 'pyannote-segmentation-3.0'; Url = 'https://huggingface.co/onnx-community/pyannote-segmentation-3.0.git' }
 )

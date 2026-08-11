@@ -53,10 +53,14 @@ export default function App() {
     const [summaryModel, setSummaryModel] = useState('gemini');
     const [chatOpen, setChatOpen] = useState(false);
 
+    const [asrModel, setAsrModel] = useState(() => localStorage.getItem('meetwise-asr-model') || 'whisper-large-v3-turbo_timestamped');
+    const currentModelRef = useRef(asrModel);
+
     const selectedMeeting = meetings.find((meeting) => meeting.id === selectedId) || null;
     const updateMeeting = useCallback((id, changes) => setMeetings((items) => items.map((item) => item.id === id ? { ...item, ...changes } : item)), []);
 
     useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(meetings)); }, [meetings]);
+    useEffect(() => { localStorage.setItem('meetwise-asr-model', asrModel); }, [asrModel]);
     useEffect(() => () => { if (audioUrl) URL.revokeObjectURL(audioUrl); }, [audioUrl]);
     useEffect(() => {
         const timer = setInterval(() => { if (recording) setRecordingSeconds((Date.now() - recordingStart.current) / 1000); }, 300);
@@ -100,17 +104,26 @@ export default function App() {
         return () => { worker.current.removeEventListener('message', onMessage); worker.current.terminate(); };
     }, [updateMeeting]);
 
-    const ensureModels = useCallback(async () => {
-        if (status === 'ready' || status === 'running') return;
+    const ensureModels = useCallback(async (forcedModel) => {
+        const targetModel = forcedModel || asrModel;
+        if (status === 'ready' || status === 'running') {
+            if (worker.current && targetModel !== currentModelRef.current) {
+                currentModelRef.current = targetModel;
+                setStatus('loading');
+                worker.current.postMessage({ type: 'load', data: { device: navigator.gpu ? 'webgpu' : 'wasm', modelId: targetModel } });
+            }
+            return;
+        }
         if (status === 'loading') return loadReady.current?.promise;
         setError('');
+        currentModelRef.current = targetModel;
         let resolveLoad;
         let rejectLoad;
         const promise = new Promise((resolve, reject) => { resolveLoad = resolve; rejectLoad = reject; });
         loadReady.current = { resolve: resolveLoad, reject: rejectLoad, promise };
-        worker.current.postMessage({ type: 'load', data: { device: navigator.gpu ? 'webgpu' : 'wasm' } });
+        worker.current.postMessage({ type: 'load', data: { device: navigator.gpu ? 'webgpu' : 'wasm', modelId: targetModel } });
         return promise;
-    }, [status]);
+    }, [status, asrModel]);
 
     const getAudioStream = async (targetDeviceId) => {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -129,7 +142,7 @@ export default function App() {
     const decodeAndTranscribe = (audioSource, targetMeeting) => {
         setStatus('running');
         updateMeeting(targetMeeting.id, { state: 'transcribing' });
-        worker.current.postMessage({ type: 'run', data: { audio: audioSource, language, meetingId: targetMeeting.id } });
+        worker.current.postMessage({ type: 'run', data: { audio: audioSource, language, meetingId: targetMeeting.id, modelId: asrModel } });
     };
 
     const createMeeting = () => {
@@ -397,7 +410,7 @@ export default function App() {
         </aside>
         {mobileMenuOpen && <div className="sidebar-backdrop" onClick={() => setMobileMenuOpen(false)} />}
         <section className="main-panel"><header className="topbar"><div><p className="eyebrow">MEETING WORKSPACE</p><h1>{selectedMeeting?.title || 'Your meeting co-pilot'}</h1></div><div className="header-actions">{selectedMeeting && <><button onClick={renameSelected}>Rename</button><button onClick={removeSelected}>Delete</button></>}</div></header>
-            <div className="recording-console"><div className={`record-indicator ${recording ? 'live' : ''}`}><span></span><div><b>{recording ? 'Recording now' : status === 'running' || selectedMeeting?.state === 'transcribing' || selectedMeeting?.state === 'queued' ? 'Transcribing recording' : hasRecording ? 'Recording completed' : 'Ready for your next meeting'}</b><small>{recording ? formatDuration(recordingSeconds) : 'Select your mic and press record'}</small></div></div><div className="console-controls"><label className="device-select"><span>Microphone</span><select value={deviceId} onChange={(event) => setDeviceId(event.target.value)} onClick={refreshDevices}><option value="default">System default microphone</option>{devices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>)}</select></label><label className="device-select language-select"><span>Language</span><LanguageSelector language={language} setLanguage={setLanguage} /></label>{!hasRecording && !recording ? <label className="upload-button">Import<input type="file" accept="audio/*,video/*" hidden onChange={(event) => importFile(event.target.files[0])} /></label> : <button className="subtle-button retry-transcribe-btn" onClick={() => retryTranscription()} disabled={recording || status === 'running' || selectedMeeting?.state === 'transcribing'} title="Re-run transcription with updated language/settings">↻ Re-transcribe</button>}<input ref={retranscribeFileRef} type="file" accept="audio/*,video/*" hidden onChange={(e) => { const f = e.target.files[0]; if (f) retryTranscription(f); }} /><button className={`record-button ${recording ? 'stop' : ''}`} onClick={recording ? stopRecording : startRecording} disabled={recording ? false : (status === 'running' || hasRecording)} title={hasRecording && !recording ? 'This meeting already has a recording. Click "+ New meeting" to record again.' : ''}>{recording ? '■ Stop' : hasRecording ? '● Submitted' : '● Start recording'}</button></div></div>
+            <div className="recording-console"><div className={`record-indicator ${recording ? 'live' : ''}`}><span></span><div><b>{recording ? 'Recording now' : status === 'running' || selectedMeeting?.state === 'transcribing' || selectedMeeting?.state === 'queued' ? 'Transcribing recording' : hasRecording ? 'Recording completed' : 'Ready for your next meeting'}</b><small>{recording ? formatDuration(recordingSeconds) : 'Select your mic and press record'}</small></div></div><div className="console-controls"><label className="device-select"><span>Microphone</span><select value={deviceId} onChange={(event) => setDeviceId(event.target.value)} onClick={refreshDevices}><option value="default">System default microphone</option>{devices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>)}</select></label><label className="device-select model-select"><span>Speech Model</span><select value={asrModel} onChange={(e) => setAsrModel(e.target.value)}><option value="whisper-large-v3-turbo_timestamped">Whisper Large v3 Turbo (High Accuracy)</option><option value="whisper-base_timestamped">Whisper Base (Fast & Lightweight)</option></select></label><label className="device-select language-select"><span>Language</span><LanguageSelector language={language} setLanguage={setLanguage} /></label>{!hasRecording && !recording ? <label className="upload-button">Import<input type="file" accept="audio/*,video/*" hidden onChange={(event) => importFile(event.target.files[0])} /></label> : <button className="subtle-button retry-transcribe-btn" onClick={() => retryTranscription()} disabled={recording || status === 'running' || selectedMeeting?.state === 'transcribing'} title="Re-run transcription with updated language/settings">↻ Re-transcribe</button>}<input ref={retranscribeFileRef} type="file" accept="audio/*,video/*" hidden onChange={(e) => { const f = e.target.files[0]; if (f) retryTranscription(f); }} /><button className={`record-button ${recording ? 'stop' : ''}`} onClick={recording ? stopRecording : startRecording} disabled={recording ? false : (status === 'running' || hasRecording)} title={hasRecording && !recording ? 'This meeting already has a recording. Click "+ New meeting" to record again.' : ''}>{recording ? '■ Stop' : hasRecording ? '● Submitted' : '● Start recording'}</button></div></div>
             {error && (
                 <div className="error-message">
                     <span>{error}</span>
